@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  --color-abyss: #07090e;
+  --color-abyss-deep: #04060a;
+  --color-mist: #93a4bd;
+  --color-ember: #e8b04b;
+  --color-smoke: #5b6b82;
+  --font-night: "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", "STSong", "SimSun", serif;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-abyss);
+  color: var(--color-mist);
+  font-family: var(--font-night);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+::selection {
+  background: transparent;
+}
+
+/* ---- 呼吸光晕 ---- */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.12) translate3d(1.5%, -1%, 0);
+  }
+}
+
+@keyframes breathe-alt {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1.05) translate3d(0, 0, 0);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.94) translate3d(-1.5%, 1.5%, 0);
+  }
+}
+
+.glow-breathe {
+  animation: breathe 14s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.glow-breathe-alt {
+  animation: breathe-alt 19s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+/* ---- 烛光闪烁 ---- */
+@keyframes flicker {
+  0%,
+  100% {
+    transform: scale(1, 1) rotate(-1.2deg);
+    opacity: 0.92;
+  }
+  18% {
+    transform: scale(0.96, 1.05) rotate(1deg);
+    opacity: 1;
+  }
+  37% {
+    transform: scale(1.03, 0.95) rotate(-1.6deg);
+    opacity: 0.85;
+  }
+  55% {
+    transform: scale(0.97, 1.04) rotate(0.8deg);
+    opacity: 0.98;
+  }
+  74% {
+    transform: scale(1.02, 0.97) rotate(-0.6deg);
+    opacity: 0.88;
+  }
+}
+
+.flame-flicker {
+  animation: flicker 3.2s ease-in-out infinite;
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+}
+
+/* ---- 极低对比度输入框 ---- */
+.zero-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  caret-color: rgba(147, 164, 189, 0.35);
+  color: rgba(147, 164, 189, 0.55);
+}
+
+.zero-input::placeholder {
+  color: rgba(147, 164, 189, 0.18);
+  letter-spacing: 0.35em;
+}
+
+.zero-input:focus {
+  outline: none;
+}
