@@ -6,7 +6,7 @@ import AmbientBackground from "./AmbientBackground";
 import LongPressLayer from "./LongPressLayer";
 import SilentSwitch from "./SilentSwitch";
 import DissolvingInput from "./DissolvingInput";
-import { startAmbient, setAmbientLevel } from "@/lib/ambientAudio";
+import { startAmbient, setAmbientDim } from "@/lib/ambientAudio";
 import { pickWhisper } from "@/lib/whispers";
 
 /** 承接短语 */
@@ -69,14 +69,10 @@ export default function ZeroSpace() {
     };
   }, []);
 
-  // 监听熄灯状态：联动底噪音量 + 熄灯承接短语
+  // 监听熄灯状态：联动底噪（熄灯压低雨声）+ 熄灯承接短语
   useEffect(() => {
-    if (lightsOut) {
-      setAmbientLevel(0.012);
-      pushWhisper(pickWhisper("lightsOut"));
-    } else {
-      setAmbientLevel(0.06);
-    }
+    setAmbientDim(lightsOut);
+    if (lightsOut) pushWhisper(pickWhisper("lightsOut"));
   }, [lightsOut, pushWhisper]);
 
   const handleToggleLight = useCallback(() => {

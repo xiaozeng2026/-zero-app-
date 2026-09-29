@@ -60,6 +60,31 @@ body {
   will-change: opacity, transform;
 }
 
+/* ---- 情绪呼吸光晕：6 秒一周期，引导心率平复 ---- */
+@keyframes mood-breath {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+
+.mood-halo {
+  animation: mood-breath 6s ease-in-out infinite;
+  will-change: opacity, transform;
+  backface-visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mood-halo {
+    animation-duration: 18s;
+  }
+}
+
 /* ---- 烛光闪烁 ---- */
 @keyframes flicker {
   0%,

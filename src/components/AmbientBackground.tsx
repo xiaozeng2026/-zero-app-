@@ -99,6 +99,15 @@ export default function AmbientBackground({
 
   return (
     <div className="pointer-events-none fixed inset-0 overflow-hidden">
+      {/* 情绪呼吸光晕：深海蓝→暗夜紫，居中 50vw，极度模糊，6 秒缓慢呼吸 */}
+      <div
+        className="mood-halo absolute left-1/2 top-1/2 h-[50vw] w-[50vw] rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(78, 102, 176, 0.34) 0%, rgba(41, 55, 107, 0.2) 42%, rgba(15, 23, 42, 0.1) 62%, transparent 72%)",
+          filter: "blur(70px)",
+        }}
+      />
       {/* 主光晕：偏青，位于上三分之一 */}
       <div
         className="glow-breathe absolute left-1/2 top-[28%] h-[60vmin] w-[60vmin] -translate-x-1/2 -translate-y-1/2 rounded-full"

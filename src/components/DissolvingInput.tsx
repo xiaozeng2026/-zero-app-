@@ -1,23 +1,22 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useCallback, useRef, useState } from "react";
+import { motion } from "framer-motion";
 
-/** 向上飘散并消融的字符气泡 */
+/**
+ * 向上飘散、模糊、放大并消融的字符
+ * 整个生命周期由 Framer Motion 驱动（无 rAF，省电且丝滑）
+ */
 interface Bubble {
   id: number;
   char: string;
   x: number;
   y: number;
-  drift: number;
+  drift: number; // 水平随风偏移
+  rise: number; // 上升距离
+  delay: number; // 逐字错峰
+  duration: number; // 2.4 ~ 3 秒
   scale: number;
-  opacity: number;
-  born: number;
 }
 
 export default function DissolvingInput({
@@ -30,76 +29,43 @@ export default function DissolvingInput({
   const [value, setValue] = useState("");
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const idRef = useRef(0);
-  const animRef = useRef<number>(0);
-  const bubblesRef = useRef<Bubble[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 将 bubbles 状态同步到 ref，避免在 raf 中闭包陷阱
-  useEffect(() => {
-    bubblesRef.current = bubbles;
-  }, [bubbles]);
-
-  const tick = useCallback(() => {
-    const now = performance.now();
-    if (bubblesRef.current.length === 0) {
-      animRef.current = requestAnimationFrame(tick);
-      return;
-    }
-    const alive: Bubble[] = [];
-    for (const b of bubblesRef.current) {
-      // 缓升 + 随风漂移 + 渐隐
-      const age = (now - b.born) / 1000;
-      if (age > 3.5) continue;
-      alive.push({
-        ...b,
-        y: b.y - 0.35 * (1 + age * 0.5),
-        x: b.x + Math.sin(now * 0.0012 + b.drift) * 0.25,
-        scale: b.scale * (1 - age * 0.12),
-        opacity: Math.max(0, b.opacity * (1 - age * 0.35)),
-      });
-    }
-    setBubbles(alive);
-    animRef.current = requestAnimationFrame(tick);
+  const removeBubble = useCallback((id: number) => {
+    setBubbles((prev) => prev.filter((b) => b.id !== id));
   }, []);
 
-  useEffect(() => {
-    animRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animRef.current);
-  }, [tick]);
+  const spawnBubbles = useCallback((text: string, rect: DOMRect) => {
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top - 10;
+    const created: Bubble[] = [];
 
-  const spawnBubbles = useCallback(
-    (text: string, rect: DOMRect) => {
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top - 10;
-      const now = performance.now();
-      const created: Bubble[] = [];
-
-      for (let i = 0; i < text.length; i++) {
-        const angle = ((i / Math.max(1, text.length)) * Math.PI * 0.8) - Math.PI * 0.4;
-        const radius = 12 + Math.random() * 28;
-        created.push({
-          id: ++idRef.current,
-          char: text[i],
-          x: centerX + Math.sin(angle) * radius + (Math.random() - 0.5) * 18,
-          y: centerY + Math.cos(angle) * 6 - Math.random() * 8,
-          drift: Math.random() * Math.PI * 2,
-          scale: 0.7 + Math.random() * 0.7,
-          opacity: 0.6 + Math.random() * 0.3,
-          born: now,
-        });
-      }
-      setBubbles((prev) => [...prev.slice(-40), ...created]);
-    },
-    []
-  );
+    for (let i = 0; i < text.length; i++) {
+      const fan =
+        (i / Math.max(1, text.length - 1) - 0.5) * Math.PI * 0.7;
+      created.push({
+        id: ++idRef.current,
+        char: text[i],
+        x: centerX + Math.sin(fan) * (10 + Math.random() * 22) + (Math.random() - 0.5) * 10,
+        y: centerY + Math.cos(fan) * 8 - Math.random() * 8,
+        drift: Math.sin(fan) * 26 + (Math.random() - 0.5) * 22,
+        rise: -50 - Math.random() * 42, // 向上 50 ~ 92px
+        delay: Math.min(i * 0.045, 1.1) + Math.random() * 0.16,
+        duration: 2.4 + Math.random() * 0.6,
+        scale: 0.75 + Math.random() * 0.5,
+      });
+    }
+    // 同屏最多保留 60 个字符，避免长文本堆积
+    setBubbles((prev) => [...prev.slice(-60 + created.length), ...created]);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== "Enter" || disabled || !value.trim()) return;
       e.preventDefault();
       const el = inputRef.current;
-      if (el) spawnBubbles(value, el.getBoundingClientRect());
       const v = value.trim();
+      if (el) spawnBubbles(v, el.getBoundingClientRect());
       setValue("");
       onSubmit(v);
     },
@@ -108,30 +74,46 @@ export default function DissolvingInput({
 
   return (
     <>
-      {/* 飘散的字符气泡 */}
+      {/* 化烟飘散的字符层 */}
       <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden">
-        <AnimatePresence>
-          {bubbles.map((b) => (
-            <motion.span
-              key={b.id}
-              className="absolute text-[rgba(147,164,189,0.55)]"
-              style={{
-                left: b.x,
-                top: b.y,
-                fontSize: `${14 * b.scale}px`,
-                transform: `translate(-50%, -50%) scale(${b.scale})`,
-                opacity: b.opacity,
-                textShadow: "0 0 6px rgba(147,164,189,0.12)",
-                fontFamily:
-                  '"Songti SC", "Noto Serif CJK SC", "Noto Serif SC", serif',
-              }}
-              initial={{ opacity: 0.8 }}
-              exit={{ opacity: 0, y: -20, transition: { duration: 0.5 } }}
-            >
-              {b.char}
-            </motion.span>
-          ))}
-        </AnimatePresence>
+        {bubbles.map((b) => (
+          <motion.span
+            key={b.id}
+            className="absolute text-[rgba(147,164,189,0.6)]"
+            style={{
+              left: b.x,
+              top: b.y,
+              fontSize: "15px",
+              // 独立 CSS translate 居中，不与 framer 驱动的 transform 冲突
+              translate: "-50% -50%",
+              textShadow: "0 0 8px rgba(147,164,189,0.14)",
+              fontFamily:
+                '"Songti SC", "Noto Serif CJK SC", "Noto Serif SC", serif',
+            }}
+            initial={{
+              opacity: 0.72,
+              x: 0,
+              y: 0,
+              scale: b.scale,
+              filter: "blur(0px)",
+            }}
+            animate={{
+              opacity: 0,
+              x: b.drift,
+              y: b.rise,
+              scale: 1.05,
+              filter: "blur(10px)",
+            }}
+            transition={{
+              duration: b.duration,
+              delay: b.delay,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+            onAnimationComplete={() => removeBubble(b.id)}
+          >
+            {b.char}
+          </motion.span>
+        ))}
       </div>
 
       {/* 底部输入框 */}
