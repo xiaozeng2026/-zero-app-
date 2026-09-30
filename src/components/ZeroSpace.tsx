@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useAnimationControls } from "framer-motion";
-import DeepSpace from "./DeepSpace";
 import EmotionCanvas, {
   type EmotionCanvasHandle,
 } from "./EmotionCanvas";
@@ -148,9 +147,6 @@ export default function ZeroSpace() {
 
   return (
     <main className="relative h-full w-full">
-      {/* 浩瀚深空：径向渐变 + 坍缩星野 + 视差（最底层） */}
-      <DeepSpace />
-
       {/* 情绪黑洞：涟漪(底) → 星穹(中) → 碎裂/汇聚 */}
       <EmotionCanvas ref={emotionRef} onStarBorn={handleStarBorn} />
 
