@@ -36,11 +36,16 @@ let dropSynth: Tone.MembraneSynth | null = null;
 let boomSynth: Tone.FMSynth | null = null;
 let padSynth: Tone.PolySynth | null = null;
 let bellSynth: Tone.MetalSynth | null = null;
+let hugSynth: Tone.PolySynth | null = null;
 
 let started = false;
 let starting: Promise<void> | null = null;
 let lastTypeAt = 0;
 let lastEchoAt = 0;
+let lastHugAt = 0;
+
+// 拥抱发送：低音大三和弦（C2 E2 G2），温暖、被托住
+const HUG_SEND_CHORD = ["C2", "E2", "G2"];
 
 const pick = <T,>(arr: readonly T[]): T =>
   arr[Math.floor(Math.random() * arr.length)];
@@ -108,6 +113,14 @@ export function initGenerative(): Promise<void> {
     });
     bellSynth.connect(reverb);
 
+    // ---- 无声拥抱：温暖低音和弦（C 大三低音转位，慢起音，像被托住）----
+    hugSynth = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.35, decay: 1.2, sustain: 0.5, release: 4.5 },
+      volume: -13,
+    });
+    hugSynth.connect(reverb);
+
     started = true;
   })();
 
@@ -159,6 +172,29 @@ export function playEchoNote() {
   lastEchoAt = now;
   try {
     bellSynth.triggerAttackRelease(pick(PENTA), "8n", undefined, 0.32);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 发送拥抱：涟漪化作光点时的温暖低音和弦 */
+export function playHugSend() {
+  if (!started || !hugSynth) return;
+  const now = performance.now();
+  if (now - lastHugAt < 400) return;
+  lastHugAt = now;
+  try {
+    hugSynth.triggerAttackRelease(HUG_SEND_CHORD, 5);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 接收拥抱：自己的某颗星被陌生人抱住，一记更柔亮的风铃回应 */
+export function playHugReceive() {
+  if (!started || !bellSynth) return;
+  try {
+    bellSynth.triggerAttackRelease("E4", "2n", undefined, 0.4);
   } catch {
     /* ignore */
   }

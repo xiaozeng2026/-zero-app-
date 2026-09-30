@@ -7,19 +7,25 @@ import EmotionCanvas, {
   type EmotionCanvasHandle,
 } from "./EmotionCanvas";
 import DissolvingInput from "./DissolvingInput";
+import WhisperPhrase, { type Whisper } from "./WhisperPhrase";
 import { dimAmbient, startAmbient } from "@/lib/ambientAudio";
 import {
   initGenerative,
   setGenerativeDim,
 } from "@/lib/generativeAudio";
+import { pickWhisper } from "@/lib/whispers";
 
 const T1 = 400; // ms — 短按→中按 阈值
 const T2 = 1500; // ms — 中按→长按 阈值
+const HOVER_HUG_THROTTLE = 90; // ms — 悬停拥抱检测节流
 
 export default function ZeroSpace() {
   const emotionRef = useRef<EmotionCanvasHandle>(null);
   const haloControls = useAnimationControls();
   const [lightsOut, setLightsOut] = useState(false);
+  const [whisper, setWhisper] = useState<Whisper | null>(null);
+  const whisperSeq = useRef(0);
+  const lastWhisperText = useRef<string | null>(null);
 
   const handleSubmit = useCallback(
     (text: string, origin: { x: number; y: number }) => {
@@ -27,6 +33,17 @@ export default function ZeroSpace() {
     },
     []
   );
+
+  // 星辰落定 → 系统回赠一张看不真切的深海字条
+  const handleStarBorn = useCallback(() => {
+    const text = pickWhisper(lastWhisperText.current);
+    lastWhisperText.current = text;
+    whisperSeq.current += 1;
+    setWhisper({ id: whisperSeq.current, text });
+  }, []);
+
+  // 稳定引用，避免字条计时器因父组件重渲染而重置
+  const clearWhisper = useCallback(() => setWhisper(null), []);
 
   // 浏览器自动播放策略：第一次有效交互时启动雨声与生成式音律
   useEffect(() => {
@@ -44,12 +61,14 @@ export default function ZeroSpace() {
     };
   }, []);
 
-  // 长按时长分层：短按=共鸣 / 中按=碎裂 / 长按=熄灯
+  // 长按时长分层：短按=拥抱涟漪/共鸣 / 中按=碎裂 / 长按=熄灯；
+  // 桌面端悬停涟漪也可直接送出拥抱
   useEffect(() => {
     let pressStart = 0;
     let t1Timer = 0;
     let t2Timer = 0;
     let pressed = false;
+    let lastHoverAt = 0;
 
     // 阈值瞬间：让 transient halo 闪一下，给用户段落感（松手即回 0）
     const flash = (level: 1 | 2) => {
@@ -79,8 +98,10 @@ export default function ZeroSpace() {
       const x = e.clientX;
       const y = e.clientY;
       if (dur < T1) {
-        // 短按 → 召唤共鸣（涟漪或流星）
-        emotionRef.current?.echo(x, y);
+        // 短按：优先拥抱触点下的涟漪；落空才召唤新的共鸣
+        if (!emotionRef.current?.hugRippleAt(x, y)) {
+          emotionRef.current?.echo(x, y);
+        }
       } else if (dur < T2) {
         // 中按 → 默认文字「…」走爆裂 → 星体流程
         emotionRef.current?.dissolve("…", { x, y });
@@ -95,6 +116,14 @@ export default function ZeroSpace() {
       }
     };
 
+    const onMove = (e: PointerEvent) => {
+      if (pressed) return; // 按压中的移动不触发，避免与长按冲突
+      const now = performance.now();
+      if (now - lastHoverAt < HOVER_HUG_THROTTLE) return;
+      lastHoverAt = now;
+      emotionRef.current?.hugRippleAt(e.clientX, e.clientY);
+    };
+
     const onCancel = () => {
       pressed = false;
       window.clearTimeout(t1Timer);
@@ -103,10 +132,12 @@ export default function ZeroSpace() {
 
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointermove", onMove);
     window.addEventListener("pointercancel", onCancel);
     return () => {
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointercancel", onCancel);
       window.clearTimeout(t1Timer);
       window.clearTimeout(t2Timer);
@@ -115,11 +146,11 @@ export default function ZeroSpace() {
 
   return (
     <main className="relative h-full w-full">
-      {/* 深渊：呼吸光晕 + 缓慢浮尘 */}
+      {/* 深渊：呼吸光晕 + 缓慢浮尘（最底层） */}
       <AmbientBackground />
 
-      {/* 情绪黑洞：碎裂 → 汇聚 → 共鸣 */}
-      <EmotionCanvas ref={emotionRef} />
+      {/* 情绪黑洞：涟漪(底) → 星穹(中) → 碎裂/汇聚 */}
+      <EmotionCanvas ref={emotionRef} onStarBorn={handleStarBorn} />
 
       {/* 阈值瞬间 halo 脉冲：平时 opacity:0 不可见，松手即回 */}
       <motion.div
@@ -139,6 +170,9 @@ export default function ZeroSpace() {
         animate={{ opacity: lightsOut ? 0.92 : 0 }}
         transition={{ duration: 1.6, ease: [0.16, 1, 0.3, 1] }}
       />
+
+      {/* 片语共鸣：深海字条（最顶层，不拦截手势） */}
+      <WhisperPhrase whisper={whisper} onDone={clearWhisper} />
 
       {/* 唯一可见入口 */}
       <DissolvingInput onSubmit={handleSubmit} />

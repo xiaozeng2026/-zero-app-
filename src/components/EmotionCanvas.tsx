@@ -11,7 +11,10 @@ import {
   playAlchemy,
   playDestruction,
   playEchoNote,
+  playHugReceive,
+  playHugSend,
 } from "@/lib/generativeAudio";
+import { loadStars, newStarId, saveStar, type StarRecord } from "@/lib/stars";
 
 /**
  * 情绪黑洞 · 粒子宇宙（单一 Canvas，单 rAF）
@@ -27,8 +30,20 @@ import {
 
 export interface EmotionCanvasHandle {
   dissolve: (text: string, origin: { x: number; y: number }) => void;
-  /** 主动召唤一次共鸣（涟漪或流星），用于用户短按触发 */
+  /** 主动召唤一次共鸣（涟漪/流星），用于用户短按触发 */
   echo: (x: number, y: number) => void;
+  /** 尝试拥抱触点下的涟漪；命中返回 true（用于短按/悬停派发） */
+  hugRippleAt: (x: number, y: number) => boolean;
+}
+
+interface EmotionCanvasProps {
+  /** 一颗新星在星穹中落定时回调（用于触发片语共鸣字条） */
+  onStarBorn?: () => void;
+}
+
+/** 星穹中的持久星辰，glowUntil 为“被拥抱”橙金光晕截止时间（performance.now ms） */
+interface SkyStar extends StarRecord {
+  glowUntil: number;
 }
 
 interface Ember {
@@ -65,12 +80,16 @@ interface Shockwave {
 interface Orb {
   x: number;
   y: number;
+  rx: number; // 归一化位置（跨尺寸恢复）
+  ry: number;
   hue: number;
   targetR: number;
+  starSize: number; // 落盘为持久微星辰时的半径
   energy: number; // 0~1，汇聚进度
   absorbed: number;
   total: number;
   dyingAge: number; // >=0 表示正在消逝
+  announced: boolean; // 是否已完成“星辰落定 + 片语回礼”
 }
 
 interface RippleEvt {
@@ -81,6 +100,7 @@ interface RippleEvt {
   dur: number;
   maxR: number;
   peak: number;
+  hugged?: boolean;
 }
 
 interface MeteorEvt {
@@ -176,10 +196,14 @@ function sampleText(
   return pts.map((p) => ({ x: ox + p.x, y: oy + p.y }));
 }
 
-const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
-  function EmotionCanvas(_, ref) {
+const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
+  function EmotionCanvas({ onStarBorn }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const punch = useAnimationControls();
+
+    // 回调以 ref 承载，rAF 闭包内永远拿到最新引用且无需重建循环
+    const onStarBornRef = useRef(onStarBorn);
+    onStarBornRef.current = onStarBorn;
 
     // 全部可变状态放在 ref 里，rAF 循环零闭包重建
     const embersRef = useRef<Ember[]>([]);
@@ -187,15 +211,37 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
     const wavesRef = useRef<Shockwave[]>([]);
     const echoesRef = useRef<Echo[]>([]);
     const orbRef = useRef<Orb | null>(null);
+    const starsRef = useRef<SkyStar[]>([]);
     const spritesRef = useRef<HTMLCanvasElement[]>([]);
     const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
     const alchemyTimer = useRef<number>(0);
+    const hugTimer = useRef<number>(0);
 
     const spriteFor = (hue: number) => {
       const bucket = Math.round(
         (clamp(((hue % 360) + 360) % 360, 0, 360) / 360) * (SPRITE_N - 1)
       );
       return spritesRef.current[bucket];
+    };
+
+    /** 在上半片天空为新生星辰寻找一个不与旧星重叠的归一化位置 */
+    const placeStar = (): { rx: number; ry: number } => {
+      const { w, h } = sizeRef.current;
+      for (let i = 0; i < 16; i++) {
+        const rx = 0.1 + Math.random() * 0.8;
+        const ry = 0.08 + Math.random() * 0.34;
+        const x = rx * w;
+        const y = ry * h;
+        let ok = true;
+        for (const s of starsRef.current) {
+          if (Math.hypot(x - s.x_position * w, y - s.y_position * h) < 72) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return { rx, ry };
+      }
+      return { rx: 0.5, ry: GATHER_Y_RATIO };
     };
 
     const dissolve = (raw: string, origin: { x: number; y: number }) => {
@@ -249,15 +295,20 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       });
       embersRef.current = embers;
 
+      const { rx, ry } = placeStar();
       orbRef.current = {
-        x: sizeRef.current.w / 2,
-        y: sizeRef.current.h * GATHER_Y_RATIO,
+        x: rx * sizeRef.current.w,
+        y: ry * sizeRef.current.h,
+        rx,
+        ry,
         hue,
         targetR,
+        starSize: clamp(1.6 + text.length * 0.12, 1.8, 4.2),
         energy: 0,
         absorbed: 0,
         total: Math.max(1, embers.length),
         dyingAge: -1,
+        announced: false,
       };
 
       wavesRef.current.push({
@@ -315,7 +366,47 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       }
     };
 
-    useImperativeHandle(ref, () => ({ dissolve, echo }), [punch]);
+    /** 无声拥抱：命中触点下的涟漪 → 转琥珀色、化作光点、温暖和弦 */
+    const hugRippleAt = (x: number, y: number): boolean => {
+      for (const e of echoesRef.current) {
+        if (e.kind !== "ripple" || e.hugged) continue;
+        const p = e.age / e.dur;
+        if (p >= 0.82) continue;
+        const r = easeOutCubic(p) * e.maxR;
+        const d = Math.hypot(x - e.x, y - e.y);
+        if (d > r + 26 && d > 26) continue;
+
+        e.hugged = true;
+        e.peak = 0.85;
+        e.maxR = Math.max(e.maxR, r + 46);
+        e.dur = e.age + 0.7; // 快速外扩后消散
+
+        // 涟漪化作琥珀色光点
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2 + Math.random() * 0.5;
+          const sp = 26 + Math.random() * 64;
+          wispsRef.current.push({
+            x: e.x + Math.cos(a) * r * 0.4,
+            y: e.y + Math.sin(a) * r * 0.4,
+            vx: Math.cos(a) * sp,
+            vy: Math.sin(a) * sp - 18,
+            size: 0.8 + Math.random() * 1.4,
+            hue: 38 + (Math.random() - 0.5) * 10,
+            age: 0,
+            dur: 1.1 + Math.random() * 0.8,
+          });
+        }
+        playHugSend();
+        return true;
+      }
+      return false;
+    };
+
+    useImperativeHandle(
+      ref,
+      () => ({ dissolve, echo, hugRippleAt }),
+      [punch]
+    );
 
     useEffect(() => {
       spritesRef.current = Array.from({ length: SPRITE_N }, (_, i) =>
@@ -331,6 +422,9 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       let last = performance.now();
       let echoTimer = 0;
 
+      // 星穹日记：启动时只恢复一次历史星辰
+      starsRef.current = loadStars().map((s) => ({ ...s, glowUntil: -1 }));
+
       const resize = () => {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const w = window.innerWidth;
@@ -342,8 +436,8 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
         canvas.style.height = `${h}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         if (orbRef.current && orbRef.current.dyingAge < 0) {
-          orbRef.current.x = w / 2;
-          orbRef.current.y = h * GATHER_Y_RATIO;
+          orbRef.current.x = orbRef.current.rx * w;
+          orbRef.current.y = orbRef.current.ry * h;
         }
       };
       resize();
@@ -384,13 +478,30 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       };
       echoTimer = window.setTimeout(spawnEcho, 2200);
 
+      // ---- 无声拥抱·接收：20~40s 随机，陌生人抱住你的某颗历史星辰 ----
+      const scheduleIncomingHug = () => {
+        hugTimer.current = window.setTimeout(() => {
+          const stars = starsRef.current;
+          if (stars.length) {
+            const s = stars[Math.floor(Math.random() * stars.length)];
+            s.glowUntil = performance.now() + 5000; // 橙金呼吸 5 秒
+            playHugReceive();
+          }
+          scheduleIncomingHug();
+        }, 20000 + Math.random() * 20000);
+      };
+      scheduleIncomingHug();
+
       const onVisibility = () => {
         if (document.hidden) {
           window.clearTimeout(echoTimer);
+          window.clearTimeout(hugTimer.current);
         } else {
           last = performance.now();
           window.clearTimeout(echoTimer);
           echoTimer = window.setTimeout(spawnEcho, 2500);
+          window.clearTimeout(hugTimer.current);
+          hugTimer.current = window.setTimeout(scheduleIncomingHug, 12000);
         }
       };
       document.addEventListener("visibilitychange", onVisibility);
@@ -429,16 +540,31 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
           const a = e.peak * Math.sin(Math.PI * p); // 淡入再淡出
           if (e.kind === "ripple") {
             const r = easeOutCubic(p) * e.maxR;
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(168, 186, 220, ${a.toFixed(3)})`;
-            ctx.lineWidth = 1.1;
-            ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(168, 186, 220, ${(a * 0.35).toFixed(3)})`;
-            ctx.lineWidth = 0.6;
-            ctx.arc(e.x, e.y, r * 0.72, 0, Math.PI * 2);
-            ctx.stroke();
+            if (e.hugged) {
+              // 被拥抱：琥珀金，明亮、外扩、中心一团暖光
+              ctx.beginPath();
+              ctx.strokeStyle = `hsla(38, 96%, 68%, ${a.toFixed(3)})`;
+              ctx.lineWidth = 1.8;
+              ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.strokeStyle = `hsla(44, 100%, 80%, ${(a * 0.5).toFixed(3)})`;
+              ctx.lineWidth = 0.9;
+              ctx.arc(e.x, e.y, r * 0.7, 0, Math.PI * 2);
+              ctx.stroke();
+              drawGlow(e.x, e.y, r * 0.5, 38, a * 0.5);
+            } else {
+              ctx.beginPath();
+              ctx.strokeStyle = `rgba(168, 186, 220, ${a.toFixed(3)})`;
+              ctx.lineWidth = 1.1;
+              ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.strokeStyle = `rgba(168, 186, 220, ${(a * 0.35).toFixed(3)})`;
+              ctx.lineWidth = 0.6;
+              ctx.arc(e.x, e.y, r * 0.72, 0, Math.PI * 2);
+              ctx.stroke();
+            }
           } else {
             const dist = p * e.speed * e.dur;
             const hx = e.x + e.dx * dist;
@@ -455,6 +581,34 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
             ctx.lineTo(hx, hy);
             ctx.stroke();
             drawGlow(hx, hy, 3.2, 222, a * 0.9);
+          }
+        }
+
+        // ---------- 星穹日记：历史星辰（中层） ----------
+        const stars = starsRef.current;
+        for (const s of stars) {
+          const sx = s.x_position * w;
+          const sy = s.y_position * h;
+          const tw = 0.62 + 0.38 * Math.sin(now * 0.0014 + s.timestamp * 0.001);
+          drawGlow(sx, sy, s.size * 3.4, s.color, 0.5 * tw);
+          drawGlow(sx, sy, s.size * 0.95, s.color + 18, 0.85 * tw);
+
+          // 接收拥抱：5 秒琥珀金呼吸光晕，整体包络淡入再淡出
+          if (now < s.glowUntil) {
+            const gp = 1 - (s.glowUntil - now) / 5000;
+            const envelope = Math.sin(Math.PI * gp);
+            const breath = 0.55 + 0.45 * Math.sin(now * 0.006);
+            const a = envelope * breath;
+            const R = s.size * (7 + 3 * breath);
+            const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, R * 2.4);
+            grad.addColorStop(0, `hsla(40, 100%, 72%, ${(0.34 * a).toFixed(3)})`);
+            grad.addColorStop(0.5, `hsla(36, 96%, 60%, ${(0.12 * a).toFixed(3)})`);
+            grad.addColorStop(1, "hsla(36, 96%, 60%, 0)");
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(sx, sy, R * 2.4, 0, Math.PI * 2);
+            ctx.fill();
+            drawGlow(sx, sy, s.size * 2.6, 40, 0.9 * a);
           }
         }
 
@@ -485,6 +639,22 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
           }
           const target = orb.absorbed / orb.total;
           orb.energy += (target - orb.energy) * Math.min(1, dt * 6);
+
+          // 全部余烬归核 → 星辰落定：写入星穹（localStorage）并回赠片语
+          if (!orb.announced && orb.absorbed >= orb.total) {
+            orb.announced = true;
+            const rec: StarRecord = {
+              id: newStarId(),
+              color: orb.hue,
+              size: orb.starSize,
+              x_position: orb.rx,
+              y_position: orb.ry,
+              timestamp: Date.now(),
+            };
+            starsRef.current.push({ ...rec, glowUntil: -1 });
+            saveStar(rec);
+            onStarBornRef.current?.();
+          }
 
           const dieP =
             orb.dyingAge >= 0 ? clamp(orb.dyingAge / 0.9, 0, 1) : 0;
@@ -591,6 +761,7 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       return () => {
         cancelAnimationFrame(raf);
         window.clearTimeout(echoTimer);
+        window.clearTimeout(hugTimer.current);
         window.clearTimeout(alchemyTimer.current);
         window.removeEventListener("resize", resize);
         document.removeEventListener("visibilitychange", onVisibility);
