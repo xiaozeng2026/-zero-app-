@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * 「归零 (Zero)」— 温暖明亮版情绪承接页
+ * 「归零 (Zero)」— 宇宙深海 (Cosmic Ocean) 版情绪承接页
  *
- * 视觉：纯黑底 + 深海蓝 / 暗紫红星云 8s 交替呼吸
- * 闭环：打字 → confetti 星尘爆裂 → 琥珀恒星落入星穹(localStorage) → 光影字条回响
- * 音律：Tone.js 深空 Drone + 水滴混响 + C2 叹息 + 恒星五声音阶
+ * 视觉：#020111 深空底座 + 呼吸星云 + 150 颗失重星野（@tsparticles/react v4）
+ * 涟漪：点击星空 → Framer Motion 暗紫/青能量波纹 scale 0→4，2.5s
+ * 闭环：打字水滴 → 文字 blur 上浮溶解 → 暖金超新星光环 + confetti 星尘
+ *       → 琥珀恒星落入星穹(localStorage) → 光影字条回响；陌生人流星/涟漪共鸣
+ * 音律：Tone.js 深空 Drone + 13s 大混响颂钵 + C2 叹息 + 恒星五声音阶
  *
  * 全部逻辑集中在本文件；旧版组件仍保留在 src/components 中（未被引用）。
  */
@@ -54,15 +56,27 @@ interface Whisper {
   text: string;
 }
 
-/* ---- 点击涟漪 / 流星（轻量 canvas 特效） ---- */
+/* ---- 时空涟漪（Framer Motion DOM 能量波纹） ---- */
 
-interface Ripple {
+type RippleTone = "violet" | "cyan" | "gold";
+
+interface RippleFx {
+  id: number;
   x: number;
   y: number;
-  start: number;
-  dur: number;
-  maxR: number;
-  warm: boolean;
+  tone: RippleTone;
+  /** 超新星：更大更亮、带暖金 */
+  supernova: boolean;
+  /** 陌生人自动涟漪：起始透明度更低 */
+  dim: boolean;
+}
+
+/** 回车时正在溶解的文字 */
+interface DissolveText {
+  id: number;
+  text: string;
+  x: number;
+  y: number;
 }
 
 interface Meteor {
@@ -75,6 +89,28 @@ interface Meteor {
   gold: boolean;
   trail: { x: number; y: number }[];
 }
+
+/** 三种能量波纹的发光配色 */
+const RIPPLE_TONES: Record<
+  RippleTone,
+  { border: string; glow: string; core: string }
+> = {
+  violet: {
+    border: "rgba(167,139,250,0.55)",
+    glow: "rgba(124,58,237,0.30)",
+    core: "rgba(139,92,246,0.10)",
+  },
+  cyan: {
+    border: "rgba(103,232,249,0.50)",
+    glow: "rgba(34,211,238,0.26)",
+    core: "rgba(34,211,238,0.08)",
+  },
+  gold: {
+    border: "rgba(253,224,140,0.75)",
+    glow: "rgba(245,158,11,0.45)",
+    core: "rgba(251,191,36,0.14)",
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /* localStorage：仅在客户端读写                                        */
@@ -100,6 +136,8 @@ export default function Home() {
   const [value, setValue] = useState("");
   const [whisper, setWhisper] = useState<Whisper | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [ripples, setRipples] = useState<RippleFx[]>([]);
+  const [dissolve, setDissolve] = useState<DissolveText | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const whisperTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,12 +145,14 @@ export default function Home() {
   const lastHoverNoteAt = useRef(0);
   /** 同一合成器的触发时间必须严格递增，快速连打时让出 1ms */
   const nextNoteTime = useRef(0);
-  const lastClickNoteAt = useRef(0);
+  const rippleSeq = useRef(0);
+  const dissolveSeq = useRef(0);
 
-  /* ---- 涟漪 / 流星 canvas 特效 ---- */
+  /* ---- 流星 canvas（涟漪已改为 DOM，canvas 只负责流星拖尾） ---- */
   const fxCanvasRef = useRef<HTMLCanvasElement>(null);
-  const ripplesRef = useRef<Ripple[]>([]);
   const meteorsRef = useRef<Meteor[]>([]);
+  /** 供长生命周期的共鸣调度器调用最新版 addRipple */
+  const rippleApiRef = useRef<(r: Omit<RippleFx, "id">) => void>(() => {});
 
   /* ---- Tone.js 句柄（首次手势后懒初始化） ---- */
   const audio = useRef<{
@@ -137,7 +177,7 @@ export default function Home() {
     audioReady.current = (async () => {
       await Tone.start();
 
-      const reverb = new Tone.Reverb({ decay: 9, wet: 0.55 });
+      const reverb = new Tone.Reverb({ decay: 13, wet: 0.72 });
       await reverb.generate();
       reverb.toDestination();
 
@@ -265,7 +305,46 @@ export default function Home() {
     return t;
   }, []);
 
-  /* ---- 涟漪 / 流星：一次 canvas + 一个 rAF，所有状态在 ref ---- */
+  /* ---- 生成一道时空涟漪（DOM，Framer Motion 驱动） ---- */
+  const addRipple = useCallback(
+    (r: Omit<RippleFx, "id">, withChime = false) => {
+      rippleSeq.current += 1;
+      const id = rippleSeq.current;
+      // 硬上限 25 个，连点也不堆积 DOM
+      setRipples((prev) => [...prev.slice(-24), { ...r, id }]);
+      if (withChime) {
+        const note = PENTA_MID[Math.floor(Math.random() * PENTA_MID.length)];
+        audio.current?.bell.triggerAttackRelease(note, "2n", claimTime());
+      }
+    },
+    [claimTime]
+  );
+
+  useEffect(() => {
+    rippleApiRef.current = addRipple;
+  }, [addRipple]);
+
+  /* ---- 点击星空：紫 / 青能量涟漪 + 颂钵音（输入框/恒星/字条豁免） ---- */
+  useEffect(() => {
+    const onPointerUp = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("input, button, a, p")) return;
+      addRipple(
+        {
+          x: e.clientX,
+          y: e.clientY,
+          tone: Math.random() < 0.5 ? "violet" : "cyan",
+          supernova: false,
+          dim: false,
+        },
+        true
+      );
+    };
+    window.addEventListener("pointerup", onPointerUp);
+    return () => window.removeEventListener("pointerup", onPointerUp);
+  }, [addRipple]);
+
+  /* ---- 流星 canvas（仅拖尾流星）+ 陌生人共鸣调度 ---- */
   useEffect(() => {
     const canvas = fxCanvasRef.current;
     if (!canvas) return;
@@ -293,17 +372,6 @@ export default function Home() {
       audio.current?.bell.triggerAttackRelease(note, "2n", claimTime());
     };
 
-    const spawnRipple = (x: number, y: number, warm: boolean) => {
-      ripplesRef.current.push({
-        x,
-        y,
-        start: performance.now(),
-        dur: 2200 + Math.random() * 900,
-        maxR: 90 + Math.random() * 120,
-        warm,
-      });
-    };
-
     const spawnMeteor = () => {
       const leftToRight = Math.random() > 0.35;
       const speed = 380 + Math.random() * 300;
@@ -320,20 +388,7 @@ export default function Home() {
       });
     };
 
-    /* ---- 点击空白：暖金涟漪（输入框 / 恒星 / 字条不响应） ---- */
-    const onPointerUp = (e: PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest?.("input, button, a, p")) return;
-      spawnRipple(e.clientX, e.clientY, true);
-      const now = Tone.now();
-      if (now - lastClickNoteAt.current > 0.8) {
-        lastClickNoteAt.current = now;
-        playChime();
-      }
-    };
-    window.addEventListener("pointerup", onPointerUp);
-
-    /* ---- 陌生人共鸣：3~8s 一次，62% 冷光涟漪 / 38% 流星 ---- */
+    /* ---- 陌生人共鸣：3~8s 一次，62% 暗紫/青涟漪 / 38% 流星 ---- */
     let echoTimer: ReturnType<typeof setTimeout>;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scheduleEcho = () => {
@@ -341,7 +396,13 @@ export default function Home() {
         () => {
           if (!document.hidden) {
             if (Math.random() < 0.62) {
-              spawnRipple(w * (0.12 + Math.random() * 0.76), h * (0.16 + Math.random() * 0.55), false);
+              rippleApiRef.current({
+                x: w * (0.12 + Math.random() * 0.76),
+                y: h * (0.16 + Math.random() * 0.55),
+                tone: Math.random() < 0.5 ? "violet" : "cyan",
+                supernova: false,
+                dim: true,
+              });
             } else {
               spawnMeteor();
             }
@@ -354,43 +415,13 @@ export default function Home() {
     };
     scheduleEcho();
 
-    /* ---- 渲染循环 ---- */
+    /* ---- 渲染循环：仅流星 ---- */
     let raf = 0;
     const render = () => {
       const now = performance.now();
       ctx.clearRect(0, 0, w, h);
       ctx.globalCompositeOperation = "lighter";
 
-      // 涟漪：双环扩散 + 中心微光
-      ripplesRef.current = ripplesRef.current.filter((r) => now - r.start < r.dur);
-      for (const r of ripplesRef.current) {
-        const t = (now - r.start) / r.dur;
-        const ease = 1 - Math.pow(1 - t, 3);
-        const radius = Math.max(0.1, ease * r.maxR);
-        const alpha = (1 - t) * 0.55;
-        const rgb = r.warm ? "251,191,36" : "150,190,255";
-        ctx.beginPath();
-        ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
-        ctx.lineWidth = Math.max(0.4, 2.2 * (1 - t));
-        ctx.strokeStyle = `rgba(${rgb},${alpha})`;
-        ctx.stroke();
-        // 内圈
-        ctx.beginPath();
-        ctx.arc(r.x, r.y, radius * 0.62, 0, Math.PI * 2);
-        ctx.lineWidth = Math.max(0.3, 1 * (1 - t));
-        ctx.strokeStyle = `rgba(${rgb},${alpha * 0.45})`;
-        ctx.stroke();
-        // 出生瞬间的中心微光
-        if (t < 0.35) {
-          const g = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, 30);
-          g.addColorStop(0, `rgba(${rgb},${(1 - t / 0.35) * 0.5})`);
-          g.addColorStop(1, `rgba(${rgb},0)`);
-          ctx.fillStyle = g;
-          ctx.fillRect(r.x - 30, r.y - 30, 60, 60);
-        }
-      }
-
-      // 流星：拖尾渐变线 + 发光头部
       meteorsRef.current = meteorsRef.current.filter(
         (m) => now - m.start < m.life && m.x > -80 && m.x < w + 80 && m.y < h + 80
       );
@@ -431,7 +462,6 @@ export default function Home() {
       cancelAnimationFrame(raf);
       clearTimeout(echoTimer);
       window.removeEventListener("resize", resize);
-      window.removeEventListener("pointerup", onPointerUp);
     };
   }, [claimTime]);
 
@@ -444,44 +474,63 @@ export default function Home() {
     audio.current?.bell.triggerAttackRelease(note, "2n", claimTime());
   }, [claimTime]);
 
-  /* ---- 提交情绪 ---- */
+  /* ---- 文字溶解结束 → 超新星 + 星尘 + 恒星（情绪彻底释放） ---- */
+  const releaseEmotion = useCallback(
+    (d: DissolveText) => {
+      setDissolve(null);
+
+      // 超新星能量光环：更大、更亮、暖金
+      addRipple({ x: d.x, y: d.y, tone: "gold", supernova: true, dim: false });
+
+      // 温暖星尘
+      burstStardust();
+
+      // 一颗明亮恒星落入上半屏星穹
+      const star: Star = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        x: 8 + Math.random() * 84,
+        y: 6 + Math.random() * 34,
+        size: 12 + Math.random() * 14,
+        color: STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)],
+        twinkle: 3 + Math.random() * 3,
+        timestamp: Date.now(),
+      };
+      persistStars([...stars, star].slice(-STARS_LIMIT));
+    },
+    [addRipple, burstStardust, persistStars, stars]
+  );
+
+  /* ---- 提交情绪：文字先在原位 blur 溶解，释放后再超新星爆发 ---- */
   const submitEmotion = useCallback(() => {
     const text = value.trim();
     if (!text) return;
+
+    const rect = inputRef.current?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.87;
+
     setValue("");
 
-    // 1) 星尘爆裂 + C2 叹息
-    burstStardust();
-    const engine = audio.current;
-    if (engine) {
-      engine.bass.triggerAttackRelease("C2", "2n", claimTime());
-    }
+    // C2 下潜叹息随文字溶解起声
+    audio.current?.bass.triggerAttackRelease("C2", "2n", claimTime());
 
-    // 2) 一颗明亮恒星落入上半屏星穹
-    const star: Star = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      x: 8 + Math.random() * 84,
-      y: 6 + Math.random() * 34,
-      size: 12 + Math.random() * 14,
-      color: STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)],
-      twinkle: 3 + Math.random() * 3,
-      timestamp: Date.now(),
-    };
-    persistStars([...stars, star].slice(-STARS_LIMIT));
+    // 文字本体留在原位，模糊上浮地溶解
+    dissolveSeq.current += 1;
+    setDissolve({ id: dissolveSeq.current, text, x, y });
 
-    // 3) 1 秒后，深空飘来一句光影字条（不连续重复）
+    // 超新星爆发的同时，深空飘来一句光影字条（不连续重复）
     if (whisperTimer.current) clearTimeout(whisperTimer.current);
     whisperTimer.current = setTimeout(() => {
-      let text = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+      let phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
       if (PHRASES.length > 1) {
-        while (text === lastPhrase.current) {
-          text = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+        while (phrase === lastPhrase.current) {
+          phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
         }
       }
-      lastPhrase.current = text;
-      setWhisper({ id: Date.now(), text });
-    }, 1000);
-  }, [value, stars, burstStardust, persistStars, claimTime]);
+      lastPhrase.current = phrase;
+      setWhisper({ id: Date.now(), text: phrase });
+    }, 1050);
+  }, [value, claimTime]);
 
   /* ---- 打字反馈：仅在"新增字符"时响水滴 ---- */
   const handleChange = (next: string) => {
@@ -500,8 +549,21 @@ export default function Home() {
     <main className="fixed inset-0 overflow-hidden bg-black font-sans">
       <StarfieldBackground />
 
-      {/* 涟漪与流星：在星空之上、星穹之下，不拦截任何点击 */}
+      {/* 流星拖尾：在星空之上，不拦截任何点击 */}
       <canvas ref={fxCanvasRef} aria-hidden className="pointer-events-none fixed inset-0 z-[5]" />
+
+      {/* 时空涟漪：能量波纹，在星空之上、星穹与输入框之下 */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-[6]">
+        {ripples.map((r) => (
+          <RippleWave
+            key={r.id}
+            ripple={r}
+            onDone={() =>
+              setRipples((prev) => prev.filter((q) => q.id !== r.id))
+            }
+          />
+        ))}
+      </div>
 
       {/* 星穹：历史恒星（中层） */}
       {hydrated && (
@@ -552,6 +614,33 @@ export default function Home() {
         </div>
       )}
 
+      {/* 回车瞬间：文字在原位模糊上浮、溶解于宇宙（1s 后触发超新星） */}
+      <AnimatePresence>
+        {dissolve && (
+          <motion.div
+            key={dissolve.id}
+            className="pointer-events-none fixed z-20"
+            style={{ left: dissolve.x, top: dissolve.y }}
+            initial={{ opacity: 1, filter: "blur(0px)", x: "-50%", y: "-50%" }}
+            animate={{
+              opacity: 0,
+              filter: "blur(10px)",
+              x: "-50%",
+              y: "-68%",
+            }}
+            transition={{ duration: 1, ease: "easeInOut" }}
+            onAnimationComplete={() => releaseEmotion(dissolve)}
+          >
+            <span
+              className="block whitespace-nowrap text-center text-[17px] font-light tracking-[0.2em] text-amber-50/75"
+              style={{ textShadow: "0 0 22px rgba(251,191,36,0.3)" }}
+            >
+              {dissolve.text}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 宇宙回响：光影字条（顶层偏上） */}
       <AnimatePresence>
         {whisper && (
@@ -598,5 +687,62 @@ export default function Home() {
         />
       </div>
     </main>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 时空能量波纹：双环星云辉光，Framer Motion 驱动 scale 0 → 4 / → 6     */
+/* ------------------------------------------------------------------ */
+
+function RippleWave({
+  ripple,
+  onDone,
+}: {
+  ripple: RippleFx;
+  onDone: () => void;
+}) {
+  const tone = RIPPLE_TONES[ripple.tone];
+  const size = ripple.supernova ? 170 : 130;
+  const endScale = ripple.supernova ? 6 : 4;
+  const dur = ripple.supernova ? 3.2 : 2.5;
+  const peak = ripple.supernova ? 0.85 : ripple.dim ? 0.38 : 0.6;
+  const glowPx = ripple.supernova ? 44 : 20;
+  const glowSpread = ripple.supernova ? 8 : 2;
+
+  return (
+    <div className="absolute" style={{ left: ripple.x, top: ripple.y }}>
+      {[0, 0.18].map((delay, i) => {
+        const outer = i === 0;
+        return (
+          <motion.div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              width: size,
+              height: size,
+              marginLeft: -size / 2,
+              marginTop: -size / 2,
+              border: `${outer ? 1.5 : 1}px solid ${tone.border}`,
+              boxShadow: `0 0 ${glowPx}px ${glowSpread}px ${tone.glow}, inset 0 0 ${
+                ripple.supernova ? 40 : 22
+              }px ${tone.glow}`,
+              background: `radial-gradient(circle, ${tone.core} 0%, transparent 72%)`,
+              willChange: "transform, opacity",
+            }}
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{
+              scale: outer ? endScale : endScale * 0.62,
+              opacity: [peak, peak * 0.5, 0],
+            }}
+            transition={{
+              duration: outer ? dur : dur * 0.8,
+              delay,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+            onAnimationComplete={outer ? onDone : undefined}
+          />
+        );
+      })}
+    </div>
   );
 }

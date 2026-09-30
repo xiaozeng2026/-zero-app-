@@ -26,13 +26,13 @@ export default function StarfieldBackground() {
       detectRetina: true,
       background: { color: { value: "transparent" } },
       particles: {
-        number: { value: 180, density: { enable: true } },
+        number: { value: 150, density: { enable: true } },
         // 大部分纯白（重复 4 份加权），少部分浅蓝与暗金
         color: {
           value: ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#e0f2fe", "#fef3c7"],
         },
         opacity: { value: 0.8 },
-        size: { value: { min: 0.5, max: 2 } },
+        size: { value: { min: 0.4, max: 1.6 } },
         links: { enable: false }, // 明确：纯粹散落星辰，绝无连线
         twinkle: {
           particles: {
@@ -62,7 +62,7 @@ export default function StarfieldBackground() {
       style={{
         zIndex: -10,
         background:
-          "radial-gradient(ellipse 120% 100% at 50% 42%, #03041a 0%, #010108 46%, #000000 80%)",
+          "radial-gradient(ellipse 120% 100% at 50% 42%, #020111 0%, #01010a 48%, #000000 82%)",
       }}
     >
       {/* 第一层 · 呼吸星云：左上紫（10s 明 → 暗） */}
