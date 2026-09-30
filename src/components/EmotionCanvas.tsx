@@ -22,6 +22,8 @@ import { motion, useAnimationControls } from "framer-motion";
 
 export interface EmotionCanvasHandle {
   dissolve: (text: string, origin: { x: number; y: number }) => void;
+  /** 主动召唤一次共鸣（涟漪或流星），用于用户短按触发 */
+  echo: (x: number, y: number) => void;
 }
 
 interface Ember {
@@ -268,7 +270,37 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       });
     };
 
-    useImperativeHandle(ref, () => ({ dissolve }), [punch]);
+    /** 主动召唤一次共鸣（用户短按触发，比背景共鸣略亮） */
+    const echo = (x: number, y: number) => {
+      if (Math.random() < 0.62) {
+        echoesRef.current.push({
+          kind: "ripple",
+          x,
+          y,
+          age: 0,
+          dur: 2.4 + Math.random() * 1.1,
+          maxR: 46 + Math.random() * 72,
+          peak: 0.18 + Math.random() * 0.12,
+        });
+      } else {
+        const ang = Math.PI * (0.12 + Math.random() * 0.16);
+        const dir = Math.random() < 0.5 ? 1 : -1;
+        echoesRef.current.push({
+          kind: "meteor",
+          x,
+          y,
+          dx: Math.cos(ang) * dir,
+          dy: Math.sin(ang),
+          age: 0,
+          dur: 1.5 + Math.random() * 0.9,
+          speed: 150 + Math.random() * 110,
+          tail: 60 + Math.random() * 55,
+          peak: 0.2 + Math.random() * 0.12,
+        });
+      }
+    };
+
+    useImperativeHandle(ref, () => ({ dissolve, echo }), [punch]);
 
     useEffect(() => {
       spritesRef.current = Array.from({ length: SPRITE_N }, (_, i) =>

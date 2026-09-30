@@ -14,7 +14,10 @@ const RAIN_SRC = "audio/rain.mp3";
 
 const HTML_VOLUME = 0.2;
 const SYNTH_VOLUME = 0.06;
+const DIM_HTML_VOLUME = 0.06;
+const DIM_SYNTH_VOLUME = 0.02;
 const FADE_MS = 5000;
+const DIM_FADE_MS = 1500;
 
 let audio: HTMLAudioElement | null = null;
 let mode: "html" | "synth" | null = null;
@@ -171,5 +174,23 @@ export function startAmbient() {
     }
   } catch {
     fallBackToSynth();
+  }
+}
+
+/**
+ * 熄灯/复原：缓慢渐变雨声音量。
+ * - dim=true  → HTML 轨 0.06，合成轨 0.02
+ * - dim=false → HTML 轨 0.2，合成轨 0.06
+ * 静默模式（mode === null）下不操作，等启动后再说。
+ */
+export function dimAmbient(dim: boolean) {
+  if (mode === "html") {
+    rampHtmlVolume(dim ? DIM_HTML_VOLUME : HTML_VOLUME, DIM_FADE_MS);
+  } else if (mode === "synth" && gainNode && actx) {
+    gainNode.gain.cancelScheduledValues(actx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(
+      dim ? DIM_SYNTH_VOLUME : SYNTH_VOLUME,
+      actx.currentTime + DIM_FADE_MS / 1000
+    );
   }
 }
