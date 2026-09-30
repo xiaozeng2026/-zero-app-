@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useAnimationControls } from "framer-motion";
-import AmbientBackground from "./AmbientBackground";
+import DeepSpace from "./DeepSpace";
 import EmotionCanvas, {
   type EmotionCanvasHandle,
 } from "./EmotionCanvas";
 import DissolvingInput from "./DissolvingInput";
 import WhisperPhrase, { type Whisper } from "./WhisperPhrase";
-import { dimAmbient, startAmbient } from "@/lib/ambientAudio";
 import {
   initGenerative,
   setGenerativeDim,
@@ -34,6 +33,11 @@ export default function ZeroSpace() {
     []
   );
 
+  // 输入中实时星尘反馈
+  const handleTypeDust = useCallback((x: number, y: number) => {
+    emotionRef.current?.emitTypingDust(x, y);
+  }, []);
+
   // 星辰落定 → 系统回赠一张看不真切的深海字条
   const handleStarBorn = useCallback(() => {
     const text = pickWhisper(lastWhisperText.current);
@@ -48,8 +52,7 @@ export default function ZeroSpace() {
   // 浏览器自动播放策略：第一次有效交互时启动雨声与生成式音律
   useEffect(() => {
     const boot = () => {
-      startAmbient();
-      void initGenerative();
+      void initGenerative(); // 雨声已替换为深空 Drone，统一由 Tone 驱动
       window.removeEventListener("pointerdown", boot);
       window.removeEventListener("keydown", boot);
     };
@@ -109,8 +112,7 @@ export default function ZeroSpace() {
         // 长按 → 切换熄灯（雨声与生成式音律一起“远去”）
         setLightsOut((v) => {
           const next = !v;
-          dimAmbient(next);
-          setGenerativeDim(next);
+          setGenerativeDim(next); // Drone + 全部音律一起“远去”
           return next;
         });
       }
@@ -146,8 +148,8 @@ export default function ZeroSpace() {
 
   return (
     <main className="relative h-full w-full">
-      {/* 深渊：呼吸光晕 + 缓慢浮尘（最底层） */}
-      <AmbientBackground />
+      {/* 浩瀚深空：径向渐变 + 坍缩星野 + 视差（最底层） */}
+      <DeepSpace />
 
       {/* 情绪黑洞：涟漪(底) → 星穹(中) → 碎裂/汇聚 */}
       <EmotionCanvas ref={emotionRef} onStarBorn={handleStarBorn} />
@@ -175,7 +177,7 @@ export default function ZeroSpace() {
       <WhisperPhrase whisper={whisper} onDone={clearWhisper} />
 
       {/* 唯一可见入口 */}
-      <DissolvingInput onSubmit={handleSubmit} />
+      <DissolvingInput onSubmit={handleSubmit} onTypeDust={handleTypeDust} />
     </main>
   );
 }

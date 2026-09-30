@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-abyss: #07090e;
-  --color-abyss-deep: #04060a;
+  --color-abyss: #020111;
+  --color-abyss-deep: #000000;
   --color-mist: #93a4bd;
   --color-ember: #e8b04b;
   --color-smoke: #5b6b82;
@@ -13,7 +13,7 @@ html,
 body {
   height: 100%;
   overflow: hidden;
-  background: var(--color-abyss);
+  background: #000000;
   color: var(--color-mist);
   font-family: var(--font-night);
   -webkit-font-smoothing: antialiased;
@@ -25,63 +25,55 @@ body {
   background: transparent;
 }
 
-/* ---- 呼吸光晕 ---- */
-@keyframes breathe {
+/* ---- 星云气体：几乎不可察的超慢漂移（70~105s） ---- */
+@keyframes nebula-drift-a {
   0%,
   100% {
-    opacity: 0.55;
-    transform: scale(1) translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    opacity: 0.9;
-    transform: scale(1.12) translate3d(1.5%, -1%, 0);
+    transform: translate3d(4vw, 3vh, 0) scale(1.12);
   }
 }
 
-@keyframes breathe-alt {
+@keyframes nebula-drift-b {
   0%,
   100% {
-    opacity: 0.35;
-    transform: scale(1.05) translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1.08);
   }
   50% {
-    opacity: 0.7;
-    transform: scale(0.94) translate3d(-1.5%, 1.5%, 0);
+    transform: translate3d(-3.5vw, -3vh, 0) scale(0.96);
   }
 }
 
-.glow-breathe {
-  animation: breathe 14s ease-in-out infinite;
-  will-change: opacity, transform;
-}
-
-.glow-breathe-alt {
-  animation: breathe-alt 19s ease-in-out infinite;
-  will-change: opacity, transform;
-}
-
-/* ---- 情绪呼吸光晕：6 秒一周期，引导心率平复 ---- */
-@keyframes mood-breath {
+@keyframes nebula-drift-c {
   0%,
   100% {
-    opacity: 0.1;
-    transform: translate(-50%, -50%) scale(0.8);
+    transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    opacity: 0.3;
-    transform: translate(-50%, -50%) scale(1.1);
+    transform: translate3d(3vw, -3.5vh, 0) scale(1.1);
   }
 }
 
-.mood-halo {
-  animation: mood-breath 6s ease-in-out infinite;
-  will-change: opacity, transform;
-  backface-visibility: hidden;
+.nebula {
+  will-change: transform, opacity;
+}
+.nebula-a {
+  animation: nebula-drift-a 105s ease-in-out infinite;
+}
+.nebula-b {
+  animation: nebula-drift-b 88s ease-in-out infinite;
+}
+.nebula-c {
+  animation: nebula-drift-c 72s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mood-halo {
-    animation-duration: 18s;
+  .nebula-a,
+  .nebula-b,
+  .nebula-c {
+    animation: none;
   }
 }
 
@@ -90,12 +82,12 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  caret-color: rgba(147, 164, 189, 0.35);
-  color: rgba(147, 164, 189, 0.55);
+  caret-color: rgba(150, 170, 220, 0.4);
+  color: rgba(180, 195, 230, 0.6);
 }
 
 .zero-input::placeholder {
-  color: rgba(147, 164, 189, 0.18);
+  color: rgba(140, 160, 205, 0.2);
   letter-spacing: 0.35em;
 }
 

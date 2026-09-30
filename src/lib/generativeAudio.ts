@@ -1,16 +1,17 @@
 "use client";
 
 /**
- * 生成式音律（Generative Audio）· Tone.js
+ * 生成式音律（Generative Audio）· Tone.js · 浩瀚宇宙版
  *
- * 所有音色汇入一个大混响（decay 9s ≈ roomSize 0.9 的空谷/深海感），
- * 再经主音量轨输出，与雨声底噪共存。
+ * 底噪：棕噪声经低通滤波 + 55Hz 亚音速正弦，缓慢 LFO 呼吸，
+ *       模拟《星际穿越》式深空 Drone（从 0 缓慢淡入）。
+ * 风铃：MetalSynth → 大 FeedbackDelay（0.62s / 0.55 反馈）→ 14s 大混响，
+ *       像信号在空旷宇宙中回荡了几万年。
  *
  * - playType        每输入一个字符：极低音量的膜鸣水滴（-20dB 以下）
  * - playDestruction 回车碎裂：FMSynth 极低频重音 C2（重担落地/叹息）
  * - playAlchemy     粒子汇聚：Cmaj9 温暖 Pad，2.2s 缓慢淡入
- * - playEchoNote    每次涟漪（含陌生人随机共鸣）：五声音阶随机风铃音，
- *                   借助大混响自动交织成永远和谐的环境音乐
+ * - playEchoNote    每次涟漪（含陌生人随机共鸣）：五声音阶随机风铃音
  *
  * 必须在用户手势（pointerdown/keydown）中调用 initGenerative()，
  * 以满足浏览器 AudioContext 自动播放策略。
@@ -27,6 +28,8 @@ const ALCHEMY_CHORD = ["C3", "E3", "G3", "B3", "D4"] as const;
 
 const MASTER_DB = -4;
 const MASTER_DIM_DB = -20;
+const DRONE_LEVEL = 0.13;
+const DRONE_DIM_LEVEL = 0.025;
 const TYPE_MIN_GAP_MS = 55; // 连续打字时限流
 const ECHO_MIN_GAP_MS = 140; // 防止快速连点堆叠
 
@@ -36,7 +39,12 @@ let dropSynth: Tone.MembraneSynth | null = null;
 let boomSynth: Tone.FMSynth | null = null;
 let padSynth: Tone.PolySynth | null = null;
 let bellSynth: Tone.MetalSynth | null = null;
+let bellDelay: Tone.FeedbackDelay | null = null;
 let hugSynth: Tone.PolySynth | null = null;
+let droneBus: Tone.Gain | null = null;
+let droneNoise: Tone.Noise | null = null;
+let droneSub: Tone.Oscillator | null = null;
+let droneLfo: Tone.LFO | null = null;
 
 let started = false;
 let starting: Promise<void> | null = null;
@@ -102,16 +110,24 @@ export function initGenerative(): Promise<void> {
     });
     padSynth.connect(reverb);
 
-    // ---- 共鸣风铃/颂钵：MetalSynth，尾音拉长以在长混响中漂浮 ----
+    // ---- 宇宙风铃/颂钵：MetalSynth → 极大延迟 → 大混响 ----
+    // 延迟 0.62s、反馈 0.55：铃音在虚空中反复反弹，越来越远
+    bellDelay = new Tone.FeedbackDelay({
+      delayTime: 0.62,
+      feedback: 0.55,
+      wet: 0.85,
+    });
+    bellDelay.connect(reverb);
+
     bellSynth = new Tone.MetalSynth({
       envelope: { attack: 0.001, decay: 3.4, release: 0.9 },
       harmonicity: 12.1,
       modulationIndex: 20,
       resonance: 3200,
       octaves: 1.2,
-      volume: -24,
+      volume: -25, // 长延迟尾音会叠加，整体压低
     });
-    bellSynth.connect(reverb);
+    bellSynth.connect(bellDelay);
 
     // ---- 无声拥抱：温暖低音和弦（C 大三低音转位，慢起音，像被托住）----
     hugSynth = new Tone.PolySynth(Tone.Synth, {
@@ -120,6 +136,34 @@ export function initGenerative(): Promise<void> {
       volume: -13,
     });
     hugSynth.connect(reverb);
+
+    // ---- 深空 Drone：棕噪声 + 亚音速正弦，低通滤波缓慢呼吸 ----
+    droneBus = new Tone.Gain(0);
+    droneBus.connect(master);
+    // 极少量混响发送，让底噪也身处空谷
+    const droneVerbSend = new Tone.Gain(0.22);
+    droneBus.connect(droneVerbSend);
+    droneVerbSend.connect(reverb);
+
+    const droneFilter = new Tone.Filter(150, "lowpass", -12);
+    droneFilter.connect(droneBus);
+
+    droneNoise = new Tone.Noise("brown");
+    droneNoise.connect(droneFilter);
+
+    const subGain = new Tone.Gain(0.07);
+    subGain.connect(droneBus);
+    droneSub = new Tone.Oscillator(55, "sine"); // A1：胸腔般的亚音速铺底
+    droneSub.connect(subGain);
+
+    // LFO 在 70~210Hz 之间极缓慢推拉滤波器，像飞船引擎般呼吸
+    droneLfo = new Tone.LFO("4m", 70, 210);
+    droneLfo.connect(droneFilter.frequency);
+
+    droneNoise.start();
+    droneSub.start();
+    droneLfo.start();
+    droneBus.gain.rampTo(DRONE_LEVEL, 9);
 
     started = true;
   })();
@@ -200,11 +244,11 @@ export function playHugReceive() {
   }
 }
 
-/** 熄灯/复原：让生成式音乐与雨声一起“远去/回来” */
+/** 熄灯/复原：让全部音律与深空 Drone 一起“远去/回来” */
 export function setGenerativeDim(dim: boolean) {
-  if (!master) return;
   try {
-    master.volume.rampTo(dim ? MASTER_DIM_DB : MASTER_DB, 1.5);
+    master?.volume.rampTo(dim ? MASTER_DIM_DB : MASTER_DB, 1.5);
+    droneBus?.gain.rampTo(dim ? DRONE_DIM_LEVEL : DRONE_LEVEL, 2.2);
   } catch {
     /* ignore */
   }

@@ -17,15 +17,13 @@ import {
 import { loadStars, newStarId, saveStar, type StarRecord } from "@/lib/stars";
 
 /**
- * 情绪黑洞 · 粒子宇宙（单一 Canvas，单 rAF）
+ * 情绪黑洞 · 星尘宇宙（单一 Canvas，单 rAF）
  *
- * 1. 物理毁灭：输入文字回车 → 像素取样 → 数百枚发光余烬瞬间爆裂，
- *    受重力向下散落（短促顿挫）。
- * 2. 情绪炼金：散落 1 秒后粒子受阻尼弹簧牵引，上浮汇聚至屏幕上半部，
- *    凝聚成一颗呼吸的微光星体。颜色/尺寸由文字长度决定
- *    （短 → 冷蓝，长 → 暗红）。
- * 3. 无字共鸣：3~8 秒随机间隔，在世界的随机角落泛起一次
- *    微弱涟漪或流星（opacity 0.1~0.3），代表陌生人刚刚消解的烦恼。
+ * 1. 星尘粉碎：输入文字回车 → 像素取样 → 数百枚星尘在真空中失重扩散
+ *    （青蓝 / 幽紫 / 暗金），缓慢漂浮。
+ * 2. 远方引力：扩散 1.35s 后星尘被温和弹簧与旋涡牵引，
+ *    汇聚至天空上半部凝成一颗呼吸星体，并永久写入星穹。
+ * 3. 无字共鸣：3~8 秒随机涟漪/流星；涟漪可被拥抱（琥珀金光点）。
  */
 
 export interface EmotionCanvasHandle {
@@ -34,6 +32,20 @@ export interface EmotionCanvasHandle {
   echo: (x: number, y: number) => void;
   /** 尝试拥抱触点下的涟漪；命中返回 true（用于短按/悬停派发） */
   hugRippleAt: (x: number, y: number) => boolean;
+  /** 输入中：从输入框位置飘起一小簇星尘 */
+  emitTypingDust: (x: number, y: number) => void;
+}
+
+/** 打字时飘起的短寿命星尘（与回车粉碎的余烬完全独立） */
+interface TypingDust {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  hue: number;
+  age: number;
+  dur: number;
 }
 
 interface EmotionCanvasProps {
@@ -120,9 +132,19 @@ type Echo = RippleEvt | MeteorEvt;
 
 const MAX_EMBERS = 720;
 const SPRITE_N = 26;
-const BURST_END = 0.95; // 爆裂散落时长（秒）
-const GATHER_BLEND = 0.34; // 切换到汇聚引力的过渡时长
+const BURST_END = 1.35; // 失重扩散时长（秒）：缓慢向四周漂浮
+const GATHER_BLEND = 0.42; // 切换到远方引力的过渡时长
 const GATHER_Y_RATIO = 0.3; // 星体汇聚在屏幕上半部
+const MAX_TYPING_DUST = 90; // 打字星尘总量上限，快速打字也不堆积
+const DUST_PER_KEY = 3; // 每个字符飘起的星尘数
+
+/** 星尘调色盘：青蓝 / 幽紫 / 暗金（45% / 35% / 20%） */
+const cosmicHue = (): number => {
+  const r = Math.random();
+  if (r < 0.45) return 196 + (Math.random() - 0.5) * 14;
+  if (r < 0.8) return 262 + (Math.random() - 0.5) * 14;
+  return 42 + (Math.random() - 0.5) * 10;
+};
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
@@ -207,6 +229,7 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
 
     // 全部可变状态放在 ref 里，rAF 循环零闭包重建
     const embersRef = useRef<Ember[]>([]);
+    const typingDustRef = useRef<TypingDust[]>([]);
     const wispsRef = useRef<Wisp[]>([]);
     const wavesRef = useRef<Shockwave[]>([]);
     const echoesRef = useRef<Echo[]>([]);
@@ -268,9 +291,8 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
         }
       }
 
-      // 长度 → 色相：短冷蓝（215），长暗红（0）
-      const t = clamp(text.length / 20, 0, 1);
-      const hue = 215 * (1 - t);
+      // 星体/星尘统一走宇宙调色盘（青蓝、幽紫、暗金）
+      const hue = cosmicHue();
       const targetR = clamp(8 + text.length * 0.9, 10, 46);
 
       const pts = sampleText(text, origin);
@@ -280,15 +302,15 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
         const dx = p.x - cx;
         const dy = p.y - cy;
         const len = Math.hypot(dx, dy) || 1;
-        // 以向外爆裂为主，带少量乱序
-        const speed = 130 + Math.random() * 300;
+        // 失重扩散：初速低、各向同性，像在真空中缓慢爆开
+        const speed = 52 + Math.random() * 175;
         return {
           x: p.x,
           y: p.y,
-          vx: (dx / len) * speed + (Math.random() - 0.5) * 150,
-          vy: (dy / len) * speed - 120 - Math.random() * 120,
+          vx: (dx / len) * speed + (Math.random() - 0.5) * 70,
+          vy: (dy / len) * speed + (Math.random() - 0.5) * 70 - 24,
           size: 0.7 + Math.random() * 1.2,
-          hue: hue + (Math.random() - 0.5) * 22,
+          hue: cosmicHue(),
           age: 0,
           absorbed: false,
         };
@@ -402,9 +424,27 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
       return false;
     };
 
+    /** 输入中：每个字符从输入框上方飘起一小簇微光星尘，缓慢上升后消散 */
+    const emitTypingDust = (x: number, y: number) => {
+      const dust = typingDustRef.current;
+      for (let i = 0; i < DUST_PER_KEY; i++) {
+        if (dust.length >= MAX_TYPING_DUST) dust.shift(); // 顶掉最老的
+        dust.push({
+          x: x + (Math.random() - 0.5) * 22,
+          y: y + (Math.random() - 0.5) * 6,
+          vx: (Math.random() - 0.5) * 16,
+          vy: -(9 + Math.random() * 22), // 失重般缓缓上浮
+          size: 0.5 + Math.random() * 0.8,
+          hue: cosmicHue(),
+          age: 0,
+          dur: 1.0 + Math.random() * 0.8,
+        });
+      }
+    };
+
     useImperativeHandle(
       ref,
-      () => ({ dissolve, echo, hugRippleAt }),
+      () => ({ dissolve, echo, hugRippleAt, emitTypingDust }),
       [punch]
     );
 
@@ -685,30 +725,30 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
         // ---------- 余烬：爆裂散落 → 上浮汇聚 ----------
         const embers = embersRef.current;
         if (embers.length && orb) {
-          const dragBurst = Math.exp(-1.15 * dt);
+          const dragBurst = Math.exp(-0.42 * dt);
           for (let i = embers.length - 1; i >= 0; i--) {
             const p = embers[i];
             if (p.absorbed) continue;
             p.age += dt;
 
             if (p.age < BURST_END) {
-              // 重力散落，初段速度快、阻尼重 → 顿挫落地感
-              p.vy += 920 * dt;
+              // 真空失重：几乎无重力，仅有极微弱的尘埃阻尼 → 缓慢外漂
+              p.vy += 42 * dt;
               p.vx *= dragBurst;
-              p.vy *= Math.exp(-0.55 * dt);
+              p.vy *= dragBurst;
             } else {
-              // 阻尼弹簧 + 轻微旋涡，把粒子吸向星体
+              // 远方黑洞：温和弹簧 + 轻微旋涡，星尘被缓缓吸入
               const k = smooth(
                 clamp((p.age - BURST_END) / GATHER_BLEND, 0, 1)
               );
               const dx = orb.x - p.x;
               const dy = orb.y - p.y;
               const dist = Math.hypot(dx, dy) || 1;
-              const swirl = 0.85 * k;
+              const swirl = 0.7 * k;
               const ax =
-                dx * 4.4 * k + (-dy / dist) * swirl * 60 - p.vx * 3.8 * k;
+                dx * 3.1 * k + (-dy / dist) * swirl * 48 - p.vx * 2.9 * k;
               const ay =
-                dy * 4.4 * k + (dx / dist) * swirl * 60 - p.vy * 3.8 * k;
+                dy * 3.1 * k + (dx / dist) * swirl * 48 - p.vy * 2.9 * k;
               p.vx += ax * dt;
               p.vy += ay * dt;
 
@@ -722,8 +762,8 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
                 drawGlow(p.x, p.y, p.size * 5, p.hue, 0.8);
                 continue;
               }
-              // 兜底：超过 6 秒强制归核
-              if (p.age > 6) {
+              // 兜底：超过 8 秒强制归核
+              if (p.age > 8) {
                 p.absorbed = true;
                 orb.absorbed += 1;
                 continue;
@@ -735,6 +775,24 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle, EmotionCanvasProps>(
             const flick = 0.7 + 0.3 * Math.sin(now * 0.006 + i);
             drawGlow(p.x, p.y, p.size * 3.4, p.hue, 0.85 * flick);
           }
+        }
+
+        // ---------- 输入中的打字星尘：缓慢上浮、微光消散 ----------
+        const dust = typingDustRef.current;
+        for (let i = dust.length - 1; i >= 0; i--) {
+          const d = dust[i];
+          d.age += dt;
+          if (d.age > d.dur) {
+            dust.splice(i, 1);
+            continue;
+          }
+          d.x += (d.vx + Math.sin(d.age * 2.2 + i) * 6) * dt;
+          d.y += d.vy * dt;
+          d.vx *= Math.exp(-0.6 * dt);
+          d.vy *= Math.exp(-0.5 * dt);
+          const p = d.age / d.dur;
+          const a = p < 0.15 ? (p / 0.15) * 0.7 : (1 - (p - 0.15) / 0.85) * 0.7;
+          drawGlow(d.x, d.y, d.size * 3.2, d.hue, a);
         }
 
         // ---------- 旧星体飘散的余烬 ----------

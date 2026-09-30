@@ -9,20 +9,31 @@ import { playType } from "@/lib/generativeAudio";
  */
 export default function DissolvingInput({
   onSubmit,
+  onTypeDust,
 }: {
   onSubmit: (text: string, origin: { x: number; y: number }) => void;
+  /** 新增字符时：在输入框上方位置飘起打字星尘 */
+  onTypeDust?: (x: number, y: number) => void;
 }) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 每敲入一个字符：极轻的低频水滴（删除/粘贴不触发）
+  // 每敲入一个字符：极轻的低频水滴 + 一簇星尘（删除/粘贴不触发）
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const next = e.target.value;
-      if (next.length > value.length) playType();
+      if (next.length > value.length) {
+        playType();
+        const rect = inputRef.current?.getBoundingClientRect();
+        if (rect) {
+          // 输入框宽度内随机一点，位于输入框上沿稍上方
+          const x = rect.left + Math.random() * rect.width;
+          onTypeDust?.(x, rect.top - 10);
+        }
+      }
       setValue(next);
     },
-    [value]
+    [value, onTypeDust]
   );
 
   const handleKeyDown = useCallback(
@@ -43,21 +54,32 @@ export default function DissolvingInput({
 
   return (
     <div className="fixed bottom-9 left-0 right-0 z-30 flex justify-center">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        placeholder="这里什么都不留下"
-        maxLength={80}
-        className="zero-input w-80 text-center text-sm tracking-widest"
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        enterKeyHint="send"
-        aria-label="消解你的念头"
-      />
+      <div className="group relative">
+        {/* 星云托底：只有悬停或打字（focus-within）时才浮现 */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-x-12 -inset-y-6 rounded-full opacity-0 blur-2xl transition-opacity duration-[1200ms] ease-out group-hover:opacity-70 group-focus-within:opacity-80"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, rgba(84,120,224,0.18) 0%, rgba(138,88,220,0.10) 46%, transparent 72%)",
+          }}
+        />
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder="这里什么都不留下"
+          maxLength={80}
+          className="zero-input relative w-80 text-center text-sm tracking-widest"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          enterKeyHint="send"
+          aria-label="消解你的念头"
+        />
+      </div>
     </div>
   );
 }

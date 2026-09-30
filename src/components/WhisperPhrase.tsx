@@ -36,11 +36,15 @@ export default function WhisperPhrase({
         {whisper && (
           <motion.p
             key={whisper.id}
-            className="select-none px-8 text-center text-xl tracking-[0.3em] text-mist"
-            style={{ textShadow: "0 0 24px rgba(147,164,189,0.25)" }}
+            className="select-none px-8 text-center text-xl tracking-[0.3em]"
+            style={{
+              color: "rgba(198, 210, 245, 0.92)",
+              textShadow:
+                "0 0 14px rgba(150,180,255,0.65), 0 0 42px rgba(120,100,230,0.45), 0 0 90px rgba(90,140,255,0.28)",
+            }}
             initial={{ opacity: 0, filter: "blur(8px)", y: 6 }}
             animate={{
-              opacity: [0, 0.55, 0.55, 0],
+              opacity: [0, 0.68, 0.68, 0],
               filter: [
                 "blur(8px)",
                 "blur(3px)",
