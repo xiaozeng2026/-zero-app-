@@ -3,22 +3,21 @@
 /**
  * 环境底噪（双轨，全程静默降级）：
  * 1. 首选：自托管真实雨声 public/audio/rain.mp3
- *    首次交互后 5 秒缓慢淡入，循环播放，常态音量 0.2
+ *    首次交互后 5 秒缓慢淡入，循环播放，音量 0.2
  * 2. 兜底：Web Audio 合成粉红噪声，文件加载失败/离线时自动接管
  *
- * 用相对路径引用音频：trailingSlash 下页面以 "/" 结尾，
- * 本地 "/" 与 GitHub Pages "/-zero-app-/" 子路径都能正确解析。
+ * 相对路径引用：trailingSlash 下页面以 "/" 结尾，
+ * 本地 "/" 与 GitHub Pages 子路径都能正确解析。
  */
 
 const RAIN_SRC = "audio/rain.mp3";
 
-const HTML_VOLUME = { normal: 0.2, dim: 0.06 };
-const SYNTH_VOLUME = { normal: 0.06, dim: 0.012 };
+const HTML_VOLUME = 0.2;
+const SYNTH_VOLUME = 0.06;
 const FADE_MS = 5000;
 
 let audio: HTMLAudioElement | null = null;
 let mode: "html" | "synth" | null = null;
-let dim = false;
 let bootStarted = false;
 let rampToken = 0;
 
@@ -44,7 +43,7 @@ function createNoiseBuffer(ctx: AudioContext, seconds = 4): AudioBuffer {
   return buf;
 }
 
-/** HTML 音频音量平滑渐变（smoothstep 缓动，定时器驱动，后台标签也不中断） */
+/** HTML 音频音量平滑渐变（smoothstep，定时器驱动，后台标签也不中断） */
 function rampHtmlVolume(to: number, ms: number) {
   const el = audio;
   if (!el) return;
@@ -74,8 +73,7 @@ function startSynth(withFade: boolean) {
     if (!AC) return;
     actx = new AC();
     gainNode = actx.createGain();
-    const target = dim ? SYNTH_VOLUME.dim : SYNTH_VOLUME.normal;
-    gainNode.gain.value = withFade ? 0.0001 : target;
+    gainNode.gain.value = withFade ? 0.0001 : SYNTH_VOLUME;
     gainNode.connect(actx.destination);
 
     const src = actx.createBufferSource();
@@ -86,7 +84,7 @@ function startSynth(withFade: boolean) {
 
     if (withFade) {
       gainNode.gain.exponentialRampToValueAtTime(
-        target,
+        SYNTH_VOLUME,
         actx.currentTime + FADE_MS / 1000
       );
     }
@@ -142,10 +140,7 @@ export function startAmbient() {
         settled = true;
         window.clearTimeout(timer);
         mode = "html";
-        rampHtmlVolume(
-          dim ? HTML_VOLUME.dim : HTML_VOLUME.normal,
-          FADE_MS
-        );
+        rampHtmlVolume(HTML_VOLUME, FADE_MS);
       },
       { once: true }
     );
@@ -176,20 +171,5 @@ export function startAmbient() {
     }
   } catch {
     fallBackToSynth();
-  }
-}
-
-/** 熄灯时压低底噪，点灯时恢复，1.5 秒平缓过渡 */
-export function setAmbientDim(next: boolean) {
-  dim = next;
-  if (mode === "html") {
-    rampHtmlVolume(next ? HTML_VOLUME.dim : HTML_VOLUME.normal, 1500);
-  } else if (mode === "synth" && actx && gainNode) {
-    gainNode.gain.cancelScheduledValues(actx.currentTime);
-    gainNode.gain.setTargetAtTime(
-      Math.max(0.0008, next ? SYNTH_VOLUME.dim : SYNTH_VOLUME.normal),
-      actx.currentTime,
-      0.4
-    );
   }
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { motion } from "framer-motion";
 
 /** 微弱浮尘粒子 */
 interface Particle {
@@ -15,18 +14,12 @@ interface Particle {
 }
 
 /**
- * 深夜呼吸背景：
- * - 两团错位呼吸的微弱光晕
+ * 深夜深渊背景：
+ * - 居中情绪呼吸光晕（6 秒周期，见 globals.css）
+ * - 两团错位的微弱环境光晕
  * - canvas 绘制的缓慢上浮浮尘
- * - pressDepth 0~1 控制整体压暗
  */
-export default function AmbientBackground({
-  pressDepth,
-  lightsOut,
-}: {
-  pressDepth: number;
-  lightsOut: boolean;
-}) {
+export default function AmbientBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -128,15 +121,6 @@ export default function AmbientBackground({
       />
       {/* 浮尘 */}
       <canvas ref={canvasRef} className="absolute inset-0" />
-
-      {/* 按压压暗层 + 熄灯压暗层 */}
-      <motion.div
-        className="absolute inset-0 bg-black"
-        animate={{
-          opacity: Math.min(0.85, pressDepth * 0.7 + (lightsOut ? 0.45 : 0)),
-        }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-      />
     </div>
   );
 }
