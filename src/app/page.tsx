@@ -54,6 +54,28 @@ interface Whisper {
   text: string;
 }
 
+/* ---- 点击涟漪 / 流星（轻量 canvas 特效） ---- */
+
+interface Ripple {
+  x: number;
+  y: number;
+  start: number;
+  dur: number;
+  maxR: number;
+  warm: boolean;
+}
+
+interface Meteor {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  start: number;
+  life: number;
+  gold: boolean;
+  trail: { x: number; y: number }[];
+}
+
 /* ------------------------------------------------------------------ */
 /* localStorage：仅在客户端读写                                        */
 /* ------------------------------------------------------------------ */
@@ -85,6 +107,12 @@ export default function Home() {
   const lastHoverNoteAt = useRef(0);
   /** 同一合成器的触发时间必须严格递增，快速连打时让出 1ms */
   const nextNoteTime = useRef(0);
+  const lastClickNoteAt = useRef(0);
+
+  /* ---- 涟漪 / 流星 canvas 特效 ---- */
+  const fxCanvasRef = useRef<HTMLCanvasElement>(null);
+  const ripplesRef = useRef<Ripple[]>([]);
+  const meteorsRef = useRef<Meteor[]>([]);
 
   /* ---- Tone.js 句柄（首次手势后懒初始化） ---- */
   const audio = useRef<{
@@ -237,6 +265,176 @@ export default function Home() {
     return t;
   }, []);
 
+  /* ---- 涟漪 / 流星：一次 canvas + 一个 rAF，所有状态在 ref ---- */
+  useEffect(() => {
+    const canvas = fxCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let w = 0;
+    let h = 0;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const resize = () => {
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    const playChime = () => {
+      const note = PENTA_MID[Math.floor(Math.random() * PENTA_MID.length)];
+      audio.current?.bell.triggerAttackRelease(note, "2n", claimTime());
+    };
+
+    const spawnRipple = (x: number, y: number, warm: boolean) => {
+      ripplesRef.current.push({
+        x,
+        y,
+        start: performance.now(),
+        dur: 2200 + Math.random() * 900,
+        maxR: 90 + Math.random() * 120,
+        warm,
+      });
+    };
+
+    const spawnMeteor = () => {
+      const leftToRight = Math.random() > 0.35;
+      const speed = 380 + Math.random() * 300;
+      const angle = (24 + Math.random() * 18) * (Math.PI / 180);
+      meteorsRef.current.push({
+        x: leftToRight ? w * (Math.random() * 0.5 - 0.05) : w * (1.05 - Math.random() * 0.5),
+        y: h * (Math.random() * 0.35 - 0.05),
+        vx: Math.cos(angle) * speed * (leftToRight ? 1 : -1),
+        vy: Math.sin(angle) * speed,
+        start: performance.now(),
+        life: 1800 + Math.random() * 700,
+        gold: Math.random() < 0.25,
+        trail: [],
+      });
+    };
+
+    /* ---- 点击空白：暖金涟漪（输入框 / 恒星 / 字条不响应） ---- */
+    const onPointerUp = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("input, button, a, p")) return;
+      spawnRipple(e.clientX, e.clientY, true);
+      const now = Tone.now();
+      if (now - lastClickNoteAt.current > 0.8) {
+        lastClickNoteAt.current = now;
+        playChime();
+      }
+    };
+    window.addEventListener("pointerup", onPointerUp);
+
+    /* ---- 陌生人共鸣：3~8s 一次，62% 冷光涟漪 / 38% 流星 ---- */
+    let echoTimer: ReturnType<typeof setTimeout>;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const scheduleEcho = () => {
+      echoTimer = setTimeout(
+        () => {
+          if (!document.hidden) {
+            if (Math.random() < 0.62) {
+              spawnRipple(w * (0.12 + Math.random() * 0.76), h * (0.16 + Math.random() * 0.55), false);
+            } else {
+              spawnMeteor();
+            }
+            playChime();
+          }
+          scheduleEcho();
+        },
+        reduced ? 9000 + Math.random() * 6000 : 3000 + Math.random() * 5000
+      );
+    };
+    scheduleEcho();
+
+    /* ---- 渲染循环 ---- */
+    let raf = 0;
+    const render = () => {
+      const now = performance.now();
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "lighter";
+
+      // 涟漪：双环扩散 + 中心微光
+      ripplesRef.current = ripplesRef.current.filter((r) => now - r.start < r.dur);
+      for (const r of ripplesRef.current) {
+        const t = (now - r.start) / r.dur;
+        const ease = 1 - Math.pow(1 - t, 3);
+        const radius = Math.max(0.1, ease * r.maxR);
+        const alpha = (1 - t) * 0.55;
+        const rgb = r.warm ? "251,191,36" : "150,190,255";
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+        ctx.lineWidth = Math.max(0.4, 2.2 * (1 - t));
+        ctx.strokeStyle = `rgba(${rgb},${alpha})`;
+        ctx.stroke();
+        // 内圈
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, radius * 0.62, 0, Math.PI * 2);
+        ctx.lineWidth = Math.max(0.3, 1 * (1 - t));
+        ctx.strokeStyle = `rgba(${rgb},${alpha * 0.45})`;
+        ctx.stroke();
+        // 出生瞬间的中心微光
+        if (t < 0.35) {
+          const g = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, 30);
+          g.addColorStop(0, `rgba(${rgb},${(1 - t / 0.35) * 0.5})`);
+          g.addColorStop(1, `rgba(${rgb},0)`);
+          ctx.fillStyle = g;
+          ctx.fillRect(r.x - 30, r.y - 30, 60, 60);
+        }
+      }
+
+      // 流星：拖尾渐变线 + 发光头部
+      meteorsRef.current = meteorsRef.current.filter(
+        (m) => now - m.start < m.life && m.x > -80 && m.x < w + 80 && m.y < h + 80
+      );
+      for (const m of meteorsRef.current) {
+        const dt = 1 / 60;
+        m.x += m.vx * dt;
+        m.y += m.vy * dt;
+        m.trail.push({ x: m.x, y: m.y });
+        if (m.trail.length > 16) m.trail.shift();
+
+        const rgb = m.gold ? "251,210,130" : "190,220,255";
+        for (let i = 1; i < m.trail.length; i++) {
+          const p0 = m.trail[i - 1];
+          const p1 = m.trail[i];
+          const k = i / m.trail.length;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          ctx.lineTo(p1.x, p1.y);
+          ctx.lineWidth = Math.max(0.3, 2.4 * k);
+          ctx.strokeStyle = `rgba(${rgb},${k * 0.6})`;
+          ctx.stroke();
+        }
+        // 头部亮核
+        const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, 7);
+        g.addColorStop(0, "rgba(255,255,255,0.95)");
+        g.addColorStop(0.4, `rgba(${rgb},0.6)`);
+        g.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(m.x - 7, m.y - 7, 14, 14);
+      }
+
+      ctx.globalCompositeOperation = "source-over";
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(echoTimer);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [claimTime]);
+
   /* ---- 恒星悬停：放大发亮 + 五声音阶 ---- */
   const touchStar = useCallback(() => {
     const now = Tone.now();
@@ -301,6 +499,9 @@ export default function Home() {
   return (
     <main className="fixed inset-0 overflow-hidden bg-black font-sans">
       <StarfieldBackground />
+
+      {/* 涟漪与流星：在星空之上、星穹之下，不拦截任何点击 */}
+      <canvas ref={fxCanvasRef} aria-hidden className="pointer-events-none fixed inset-0 z-[5]" />
 
       {/* 星穹：历史恒星（中层） */}
       {hydrated && (
