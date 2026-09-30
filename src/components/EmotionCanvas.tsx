@@ -7,6 +7,11 @@ import {
   useRef,
 } from "react";
 import { motion, useAnimationControls } from "framer-motion";
+import {
+  playAlchemy,
+  playDestruction,
+  playEchoNote,
+} from "@/lib/generativeAudio";
 
 /**
  * 情绪黑洞 · 粒子宇宙（单一 Canvas，单 rAF）
@@ -184,6 +189,7 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
     const orbRef = useRef<Orb | null>(null);
     const spritesRef = useRef<HTMLCanvasElement[]>([]);
     const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
+    const alchemyTimer = useRef<number>(0);
 
     const spriteFor = (hue: number) => {
       const bucket = Math.round(
@@ -268,10 +274,19 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
         scale: [1, 1.014, 1],
         transition: { duration: 0.42, ease: [0.16, 1, 0.3, 1] },
       });
+
+      // 音律：C2 沉重低音落地；散落结束（≈0.95s）时 Cmaj9 缓慢升华
+      playDestruction();
+      if (alchemyTimer.current) window.clearTimeout(alchemyTimer.current);
+      alchemyTimer.current = window.setTimeout(
+        () => playAlchemy(),
+        BURST_END * 1000
+      );
     };
 
     /** 主动召唤一次共鸣（用户短按触发，比背景共鸣略亮） */
     const echo = (x: number, y: number) => {
+      playEchoNote();
       if (Math.random() < 0.62) {
         echoesRef.current.push({
           kind: "ripple",
@@ -363,6 +378,8 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
             peak: 0.1 + Math.random() * 0.12,
           });
         }
+        // 陌生人的一次消解 → 五声音阶风铃音，与所有历史音在大混响中共鸣
+        playEchoNote();
         echoTimer = window.setTimeout(spawnEcho, 3000 + Math.random() * 5000);
       };
       echoTimer = window.setTimeout(spawnEcho, 2200);
@@ -574,6 +591,7 @@ const EmotionCanvas = forwardRef<EmotionCanvasHandle>(
       return () => {
         cancelAnimationFrame(raf);
         window.clearTimeout(echoTimer);
+        window.clearTimeout(alchemyTimer.current);
         window.removeEventListener("resize", resize);
         document.removeEventListener("visibilitychange", onVisibility);
       };

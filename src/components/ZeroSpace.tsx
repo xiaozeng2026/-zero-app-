@@ -8,6 +8,10 @@ import EmotionCanvas, {
 } from "./EmotionCanvas";
 import DissolvingInput from "./DissolvingInput";
 import { dimAmbient, startAmbient } from "@/lib/ambientAudio";
+import {
+  initGenerative,
+  setGenerativeDim,
+} from "@/lib/generativeAudio";
 
 const T1 = 400; // ms — 短按→中按 阈值
 const T2 = 1500; // ms — 中按→长按 阈值
@@ -24,10 +28,11 @@ export default function ZeroSpace() {
     []
   );
 
-  // 浏览器自动播放策略：第一次有效交互时启动雨声
+  // 浏览器自动播放策略：第一次有效交互时启动雨声与生成式音律
   useEffect(() => {
     const boot = () => {
       startAmbient();
+      void initGenerative();
       window.removeEventListener("pointerdown", boot);
       window.removeEventListener("keydown", boot);
     };
@@ -80,10 +85,11 @@ export default function ZeroSpace() {
         // 中按 → 默认文字「…」走爆裂 → 星体流程
         emotionRef.current?.dissolve("…", { x, y });
       } else {
-        // 长按 → 切换熄灯
+        // 长按 → 切换熄灯（雨声与生成式音律一起“远去”）
         setLightsOut((v) => {
           const next = !v;
           dimAmbient(next);
+          setGenerativeDim(next);
           return next;
         });
       }

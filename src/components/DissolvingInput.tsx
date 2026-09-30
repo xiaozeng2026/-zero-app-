@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { playType } from "@/lib/generativeAudio";
 
 /**
  * 隐形输入框：回车后把文字与“文字所在位置”交给粒子系统，
@@ -13,6 +14,16 @@ export default function DissolvingInput({
 }) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 每敲入一个字符：极轻的低频水滴（删除/粘贴不触发）
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const next = e.target.value;
+      if (next.length > value.length) playType();
+      setValue(next);
+    },
+    [value]
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -36,7 +47,7 @@ export default function DissolvingInput({
         ref={inputRef}
         type="text"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder="这里什么都不留下"
         maxLength={80}
