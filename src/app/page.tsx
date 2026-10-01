@@ -859,25 +859,48 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* 唯一的 UI：底部居中无边框输入框 */}
-      <div className="fixed inset-x-0 bottom-[13vh] z-30 flex justify-center px-8">
-        <input
-          ref={inputRef}
-          value={value}
-          maxLength={80}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => handleChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submitEmotion();
-            }
-          }}
-          placeholder="把情绪留在这里..."
-          className="w-full max-w-[520px] border-none bg-transparent text-center text-[17px] font-light tracking-[0.2em] text-amber-50/60 caret-amber-300/70 outline-none placeholder:text-neutral-500/70"
-          style={{ textShadow: "0 0 18px rgba(251,191,36,0.18)" }}
-        />
+      {/* 唯一的 UI：底部居中无边框输入框 + 呼吸暖光 / 地平线发丝线（纯 CSS 聚焦反馈） */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-[13vh] z-30 flex justify-center px-8">
+        <div className="group relative flex w-full max-w-[520px] flex-col items-center">
+          {/* 背后暖光：静息近无，聚焦时琥珀→暗紫缓缓亮起 */}
+          <div
+            aria-hidden
+            className="absolute -bottom-12 left-1/2 h-44 w-[130%] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(251,191,36,0.10),rgba(124,58,237,0.06)_46%,transparent_72%)] opacity-30 blur-2xl transition-opacity duration-1000 ease-out group-focus-within:opacity-100"
+          />
+
+          <input
+            ref={inputRef}
+            value={value}
+            maxLength={80}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitEmotion();
+              }
+            }}
+            placeholder="把情绪留在这里..."
+            className="pointer-events-auto relative z-10 w-full border-none bg-transparent text-center text-[17px] font-light tracking-[0.2em] text-amber-50/55 caret-amber-300/80 outline-none transition-[color,text-shadow] duration-700 placeholder:tracking-[0.32em] placeholder:text-neutral-400/40 placeholder:transition-opacity duration-700 focus:text-amber-50/90 [text-shadow:0_0_14px_rgba(251,191,36,0.12)] focus:[text-shadow:0_0_26px_rgba(251,191,36,0.45)] focus:placeholder:opacity-30"
+          />
+
+          {/* 地平线：静息短而隐，聚焦/有字时延展并透出琥珀辉光 */}
+          <div
+            aria-hidden
+            className={`relative mt-4 h-px w-28 overflow-hidden bg-gradient-to-r from-transparent via-slate-200/20 to-transparent transition-all duration-700 ease-out group-focus-within:w-72 group-focus-within:via-amber-200/70 ${
+              value.trim() ? "w-72 via-amber-200/45" : ""
+            }`}
+          >
+            {/* 辉光底层 */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-200/60 to-transparent opacity-0 blur-[3px] transition-opacity duration-700 group-focus-within:opacity-90" />
+            {/* 游移流光（仅聚焦时可见） */}
+            <div className="zero-line-shimmer absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-amber-50/80 to-transparent opacity-0 transition-opacity duration-700 group-focus-within:opacity-100" />
+            {/* 两端星点 */}
+            <span className="absolute -left-[2px] top-1/2 h-[3px] w-[3px] -translate-y-1/2 rounded-full bg-slate-200/30 shadow-[0_0_6px_1px_rgba(226,232,240,0.15)] transition-all duration-700 group-focus-within:scale-150 group-focus-within:bg-amber-200 group-focus-within:shadow-[0_0_8px_2px_rgba(251,191,36,0.5)]" />
+            <span className="absolute -right-[2px] top-1/2 h-[3px] w-[3px] -translate-y-1/2 rounded-full bg-slate-200/30 shadow-[0_0_6px_1px_rgba(226,232,240,0.15)] transition-all duration-700 group-focus-within:scale-150 group-focus-within:bg-amber-200 group-focus-within:shadow-[0_0_8px_2px_rgba(251,191,36,0.5)]" />
+          </div>
+        </div>
       </div>
     </main>
   );

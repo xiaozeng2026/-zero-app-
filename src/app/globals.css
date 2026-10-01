@@ -94,3 +94,24 @@ body {
 .zero-input:focus {
   outline: none;
 }
+
+/* ---- 输入框地平线上的游移流光（仅聚焦时由 opacity 显形） ---- */
+@keyframes zero-line-shimmer {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.zero-line-shimmer {
+  animation: zero-line-shimmer 3.6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zero-line-shimmer {
+    animation: none;
+  }
+}
