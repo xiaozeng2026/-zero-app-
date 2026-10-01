@@ -18,6 +18,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import * as Tone from "tone";
 import StarfieldBackground from "@/components/StarfieldBackground";
+import NebulaWonders from "@/components/NebulaWonders";
 
 /* ------------------------------------------------------------------ */
 /* 常量与类型                                                          */
@@ -738,6 +739,9 @@ export default function Home() {
           filter: "blur(70px)",
         }}
       />
+
+      {/* 星云奇观：宏大冷色星云，随星云温度交叉淡入暖金/余烬燃烧态（纯视觉层 z-8） */}
+      <NebulaWonders tempRef={nebulaTempRef} />
 
       {/* 流星拖尾：在星空之上，不拦截任何点击 */}
       <canvas ref={fxCanvasRef} aria-hidden className="pointer-events-none fixed inset-0 z-[5]" />
