@@ -3,8 +3,8 @@
 > 一片可以把情绪丢进去的浩瀚深空。
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
-> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网」
-> 文档生成日期：2026-10-01
+> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA」
+> 文档更新日期：2026-10-02（基于 commit 850c7af）
 
 ---
 
@@ -46,13 +46,25 @@ zero-app/
 ├── next.config.ts                 # output:"export" + BASE_PATH 子路径注入
 ├── postcss.config.mjs             # Tailwind v4 PostCSS 插件
 ├── package.json
+├── public/
+│   ├── sw.js                      # ★ Service Worker：导航网络优先 + 静态 SWR 离线缓存
+│   ├── manifest.webmanifest       # （构建产物，由 src/app/manifest.ts 生成）
+│   ├── icon.svg                   # ★ favicon：深空蓝晕 + 暖金恒星
+│   ├── icon-192.png               # ★ PWA 图标 192
+│   ├── icon-512.png               # ★ PWA 图标 512
+│   ├── icon-maskable-512.png      # ★ PWA maskable 图标（星体缩 0.62 留安全区）
+│   ├── apple-touch-icon.png       # ★ iOS 主屏图标 180
+│   └── .nojekyll                  # 关闭 Pages 的 Jekyll 处理
 └── src/
     ├── app/
-    │   ├── layout.tsx             # 根布局：元信息、viewport、黑底
+    │   ├── layout.tsx             # 根布局：元信息/manifest/图标/appleWebApp/themeColor
+    │   ├── manifest.ts            # ★ PWA 清单（force-static，BASE_PATH 前缀）
     │   ├── globals.css            # Tailwind 主题令牌 + 星云漂移/流光关键帧
     │   └── page.tsx               # ★ 首页与全部核心逻辑（唯一活跃入口）
     ├── components/
-    │   ├── StarfieldBackground.tsx # ★ 星空底座（渐变 + 星云 + tsparticles）
+    │   ├── StarfieldBackground.tsx # ★ 星空底座（渐变 + tsparticles）
+    │   ├── NebulaWonders.tsx       # ★ 星云奇观层（宏大星云 + 悬停/触屏交互 + 温度联动）
+    │   ├── ServiceWorkerRegister.tsx # ★ load 后注册 sw.js（静默失败）
     │   ├── ZeroSpace.tsx           # ┐
     │   ├── EmotionCanvas.tsx       # ├ 旧版组件群：当前版本未引用（死代码）
     │   ├── DissolvingInput.tsx     # │ 改动时勿误伤，也不要在本次任务中顺手删除
@@ -63,9 +75,10 @@ zero-app/
         └── whispers.ts             # ┘
 ```
 
-核心代码集中在两个文件：
+核心代码集中在三个文件：
 
-- `src/app/page.tsx`（约 950 行）：状态、音频引擎、三层定时器、Canvas 流星、自适应爆发、输入框。
+- `src/app/page.tsx`（约 1000 行）：状态、音频引擎、三层定时器、Canvas 流星、自适应爆发、输入框、可见性挂起。
+- `src/components/NebulaWonders.tsx`：星云奇观层（3 团宏大星云、冷暖双层温度联动、悬停/触屏交互）。
 - `src/components/StarfieldBackground.tsx`：纯展示星空底座。
 
 ---
@@ -79,12 +92,14 @@ flowchart TB
     subgraph Browser["浏览器（纯前端，无后端）"]
         UI["输入框 UI<br/>Tailwind + focus-within"]
         State["React State/Refs<br/>ripples / dissolve / stars / temperature"]
-        FM["Framer Motion DOM 层<br/>能量涟漪 · 文字溶解 · 字条"]
+        FM["Framer Motion DOM 层<br/>能量涟漪 · 文字溶解 · 字条 · 星云自转/呼吸"]
         Canvas["Canvas rAF 循环<br/>流星渲染 + 星云温度冷却"]
         TP["@tsparticles v4<br/>150 颗星野（z-10）"]
+        NW["NebulaWonders 星云奇观层<br/>冷暖双层 · 悬停/触屏交互（z-8）"]
         Confetti["canvas-confetti<br/>自适应星尘（z60）"]
         Tone["Tone.js 音频图<br/>Drone/水滴/拨弦/Bass/双混响"]
         LS[("localStorage<br/>zero:stars:warm:v1")]
+        SW["Service Worker<br/>离线缓存外壳"]
     end
 
     UI -->|打字水滴 / 回车提交| State
@@ -94,6 +109,8 @@ flowchart TB
     State --> Tone
     State --> LS
     Canvas -->|直写 style，不走 React| HeatLayer["热力暖光层 z-9"]
+    Canvas -->|温度 ref| NW
+    Pointer["鼠标/触屏 pointer 事件"] -->|视差/增亮/光斑| NW
 ```
 
 ### 4.2 视觉层级（z-index 约定）
@@ -102,6 +119,7 @@ flowchart TB
 |---|---|---|
 | `-10` | 星空底座 | 径向渐变 + 呼吸星云 + tsparticles |
 | `-9` | 星云热力层 | 回车加热后的暗红/琥珀暖光，rAF 直写 opacity/scale |
+| `-8` | 星云奇观层 | NebulaWonders：3 团宏大星云，blur 180-200px / screen 混合 / 自转呼吸 / 温度冷暖交叉淡化 / 悬停触屏交互 |
 | `4/5` | 流星 Canvas | 仅负责流星拖尾与头部亮核 |
 | `6` | DOM 能量涟漪 | 点击/回车/同辈三类波纹 |
 | `10` | 恒星星穹 | localStorage 持久化恒星，可悬停发声 |
@@ -166,7 +184,47 @@ sequenceDiagram
 
 关键参数：150 颗、`size 0.4–1.6`、`links.enable = false`、`move.direction = "top"` + `random`、speed 0.1–0.3、twinkle 谷底 0.1。
 
-### 5.2 能量涟漪（RippleWave 组件）
+### 5.2 星云奇观层（NebulaWonders）
+
+`src/components/NebulaWonders.tsx`，位于星空底座（z-10）与热力层（z-9）之上、流星/涟漪之下，**纯视觉增量层，不承载业务逻辑**。
+
+**静态结构**（3 团宏大星云，CLOUDS 数组定义）：
+
+| 云团 | 位置 | size/blur | 冷色 | 暖色（燃烧态） | 自转 | 呼吸 | 视差/增亮 |
+|---|---|---|---|---|---|---|---|
+| 暗紫罗兰 | 左上天幕 | 82vmin / 180px | `rgba(88,28,135,…)` | 暗金→余烬红 | 140s | 34s ×1.22 | 22px / +0.20 |
+| 深海青蓝 | 右下 | 88vmin / 190px | `rgba(14,116,144,…)` | 琥珀→焦橙 | -120s | 28s ×1.18 | 30px / +0.18 |
+| 品红主体辉光 | 中央偏上（最大最淡） | 96vmin / 200px | `rgba(112,26,94,…)` | 暖金→赤红 | 170s | 40s ×1.26 | 14px / +0.15 |
+
+每团云的 DOM 嵌套（各动效层解耦、互不干扰）：
+
+```text
+视差层 div (parallaxRef, rAF 直写 translate3d)
+└─ motion.div 自转 (spin 120~170s 线性 360°)
+   └─ motion.div 呼吸 (breathe 28~40s, scale 1→scalePeak→1)
+      └─ 觉醒层 div (wakeRefs, rAF 直写 scale 1+wake≤1.04)
+         ├─ 冷层 (coldLayersRef, rAF 直写 opacity，无 CSS transition)
+         └─ 暖层 (hotLayersRef, opacity 跟随温度，CSS transition 4s 交叉淡化)
+```
+
+容器 `fixed inset-0 z-[-8] mix-blend-mode: screen pointer-events-none`。
+
+**温度联动**：内部 250ms 低频采样 `tempRef.current`（page.tsx 的 `nebulaTempRef`），直写每团暖层 `style.opacity = T * hotGain`。升温时暖层 4s CSS 淡入（「燃烧」）；冷却时随 5.5 节的指数衰减花数分钟回归冷色。**冷层 opacity 不走 CSS transition**——rAF 与 CSS transition 写同一属性会互相打架。
+
+**悬停/触屏交互**（全部 ref + rAF 惯性插值，零 React 重渲染）：
+
+- 监听 window `pointermove / pointerdown / pointerup / pointercancel / pointerleave / blur / resize`。
+- 鼠标：任意时刻驱动（hover 语义）。
+- 触屏：仅手指**按下拖动**时驱动（`pointerdown` 记录 `touchId`，`pointermove` 校验 `pointerId`，`pointerup/cancel` 熄灭）；落在 `input, textarea, button, a, [data-no-glow]` 上的按压不触发（`closest()` 前做 `typeof el.closest === "function"` 防御，合成事件 target 可能是 window）。
+- 每团云按指针到云心距离算感应强度 `prox`（云心=1，感应半径外线性衰减到 0；感应半径 = 云体半径 + 到视口中心的扁平补偿，保证视口内任意点可被覆盖又不全域同亮）。
+- 每帧对每团云插值三个目标（LERP=0.045，沉重惯性）：
+  - **视差吸引**：朝指针方向偏移，上限 `parallax` px；
+  - **局部增亮**：冷层 `opacity = coldAlpha + hoverGlow * prox`；
+  - **觉醒吸气**：`scale = 1 + wake`，`wake ≤ 0.04`。
+- **指尖唤醒光斑**：52vmin 圆形柔光（blur 28px，白青紫 radial，screen 混合），GLOW_LERP=0.12 更贴手，`opacity = maxProx * 0.55`，`scale = 0.85 + o*0.3`；指针离开/抬起时淡出。
+- `prefers-reduced-motion: reduce` 时整个交互 effect 不挂载（自转/呼吸由 Framer Motion 的全局降级处理）。
+
+### 5.3 能量涟漪（RippleWave 组件）
 
 - 数据模型：
 
@@ -189,7 +247,7 @@ interface RippleFx {
 | 回车释放 | `releaseEmotion` | 轻：cyan 120px→3.4/1.7s；重：violet 200px→6.5/4.4s |
 | 同辈之网 | 独立慢定时器 | 105px→2.8/3.8s，peak 0.1–0.2，屏幕边缘 |
 
-### 5.3 情绪自适应（Adaptive Resonance）
+### 5.4 情绪自适应（Adaptive Resonance）
 
 分档阈值常量 `HEAVY_THRESHOLD = 10`（按 `text.trim().length`，即字符数，中英文等价）。
 
@@ -204,7 +262,7 @@ interface RippleFx {
 | 文字溶解时长 | 1s | 1.5s |
 | 星云加热量 | +0.26 | +0.55 |
 
-### 5.4 星云热力学（Non-linear Energy Dissipation）
+### 5.5 星云热力学（Non-linear Energy Dissipation）
 
 - 温度存于 `nebulaTempRef`（**ref 而非 state**，取值 0–1），避免 60fps 触发 React 渲染。
 - 加热：回车时 `T = min(1, T + Δ)`。
@@ -219,7 +277,7 @@ if (T < 0.002) T = 0;                          // 死区，彻底归零
 - 输出：变化量超过 0.003 时才直写热力层 DOM：`opacity = T*0.85`、`transform = scale(1 + T*0.22)`。热力层为 blur(70px) 的暗红→琥珀径向渐变，位于 z-9。
 - `dt` 用 `Math.min(0.1, …)` 钳制，切后台造成的大时间跳变不会让温度瞬间清零。
 
-### 5.5 同辈之网（Silent Peer Support Network）
+### 5.6 同辈之网（Silent Peer Support Network）
 
 - 独立 `useEffect` 中的 **setTimeout 自调度链**（与流星/近场共鸣调度器完全分离），间隔 `15000 + random*30000` ms（15–45s）。
 - 坐标：屏幕四条极边缘带（左右各 8% 宽、上下各 12% 高）内随机一点。
@@ -229,7 +287,7 @@ if (T < 0.002) T = 0;                          // 死区，彻底归零
 
 > 另有「近场共鸣」调度器（5–12s，开启减弱动效时 11–19s）：65% 生成 Canvas 流星（25% 金色）、35% 生成普通暗涟漪，播放常规 bell。两套循环寓意不同，勿合并。
 
-### 5.6 生成式音频（Tone.js 音频图）
+### 5.7 生成式音频（Tone.js 音频图）
 
 ```mermaid
 flowchart LR
@@ -258,7 +316,7 @@ const t = Math.max(Tone.now(), nextNoteTimeRef.current + 0.001);
 
 - Drone：3 支振荡器（第三支 110.2Hz 增益 0.25）→ 低通 150Hz → 0.08Hz LFO 让截止频率 90–220Hz 呼吸；初始化后 6s 淡入到 0.045。
 
-### 5.7 星穹与本地持久化
+### 5.8 星穹与本地持久化
 
 - Key：`zero:stars:warm:v1`；仅客户端 `useEffect` 内读取，规避 SSR hydration mismatch。
 - 结构：
@@ -277,11 +335,11 @@ interface Star {
 - 每次回车落一颗（位置/大小/色/周期随机），写入前 `slice(-120)` 限流；`setItem` 包 try/catch，存储不可用也不影响体验。
 - 悬停/触摸恒星：放大发亮 + `touchStar()`（0.12s 节流）随机五声音阶。
 
-### 5.8 光影字条
+### 5.9 光影字条
 
 回车后 1.05s 浮出，从 5 条低语中抽取且**不与上一条重复**；Framer Motion 7.4s 时间轴：blur(10→2→2→14px)、opacity `[0,1,1,0]`，结束 `setWhisper(null)`。
 
-### 5.9 输入框视觉（纯 CSS，零状态）
+### 5.10 输入框视觉（纯 CSS，零状态）
 
 容器 `group` + `focus-within` 实现三态，不增加任何 React 状态：
 
@@ -290,15 +348,51 @@ interface Star {
 - 有字未聚焦：横线保持延展微亮（由 `value.trim()` 切换类）。
 - 流光关键帧定义在 `globals.css`，`prefers-reduced-motion: reduce` 时关闭。
 
-### 5.10 副作用生命周期清单
+### 5.11 PWA：装到主屏与离线
+
+目标是让「归零」在手机桌面像原生 App 一样全屏启动，且弱网/离线可打开。
+
+**清单 `src/app/manifest.ts`**（`export const dynamic = "force-static"`，静态导出必需）：
+
+- `name "归零 Zero"` / `short_name "归零"`、`display "standalone"`、`orientation "any"`；
+- `start_url` / `scope` 均为 `${basePath}/`（CI 注入 `/-zero-app-`），保证装在子路径下也能正确回跳；
+- `background_color #000000`、`theme_color #020111`；
+- 三图标：192/512 `purpose "any"` + 512 `purpose "maskable"`（maskable 版星体缩至 0.62，预留 Android 自适应图标的裁切安全区）。
+
+**元信息 `layout.tsx`**：`metadata.manifest`、`icons.icon`（icon.svg + icon-192.png）、`icons.apple`（apple-touch-icon.png）、`appleWebApp {capable, title "归零", statusBarStyle "black-translucent"}`；`viewport.themeColor = "#020111"`（与深空底色一致，启动时不露白）。
+
+**图标**：`public/` 下 1 个 SVG + 4 个 PNG。PNG 由 PowerShell `System.Drawing` 脚本生成：黑底 + 深空蓝晕 + 左上紫晕 + 星点 + 中央暖金恒星多层辉光。径向渐变用**环形带（annulus）逐段填充**（`FillPath` 外圈减内圈、关 SmoothingMode 避免带间接缝、仅星点开抗锯齿）消除 GDI+ 同心环带。
+
+**Service Worker `public/sw.js`**（cache 名 `zero-shell-v1`，scope 由注册位置天然限定到子路径）：
+
+- `install`：预缓存 `manifest.webmanifest`（外壳失败无妨，运行时会补）→ `skipWaiting()`；
+- `activate`：清旧 cache → `clients.claim()`；
+- `fetch`：仅处理同源 GET。**页面导航网络优先**（成功时刷新外壳缓存、失败回退缓存外壳），**其余静态资源 Stale-While-Revalidate**（带 hash 的 JS/CSS/图标先出缓存、后台更新）。
+
+**注册 `ServiceWorkerRegister.tsx`**：`"use client"` 空组件，`load` 事件后 `navigator.serviceWorker.register(new URL("./sw.js", location.href))`，`catch` 静默——非安全上下文（如 file://）或禁用时不影响任何功能。挂在 `layout.tsx` body 尾部。
+
+### 5.12 标签页可见性：隐藏时静默
+
+`page.tsx` 中的 `visibilitychange` effect（挂载一次）：
+
+- **隐藏时**：`document.title = "…"`（极简静默信号）；若音频已初始化且 `AudioContext.state === "running"`，记录 `suspendedByUs = true` 并 `ctx.suspend()` 省电。
+- **恢复时**：标题还原 `"归零 Zero"`；仅当是我们挂起的才 `ctx.resume()`（不打断用户在其他标签页的音频状态）。
+- **标题先行**：标题变化不依赖音频引擎是否已初始化（`audioReady.current` 判空），音频部分整体 `try/catch` 静默。
+- 卸载时移除监听并把标题还原。
+
+### 5.13 副作用生命周期清单
 
 | Effect / 定时器 | 职责 | 清理 |
 |---|---|---|
 | 启动 effect | 读取 localStorage 星穹 | 无需清理 |
 | 音频解锁 effect | 首次手势 `ensureAudio()` | removeEventListener |
+| 可见性 effect | 标题静默 + suspend/resume 音频 | removeEventListener + 标题还原 |
 | 点击涟漪 effect | window pointerup | removeEventListener |
 | Canvas effect | resize、rAF 流星+温度冷却、近场共鸣 setTimeout | cancelAnimationFrame + clearTimeout + removeEventListener |
 | 同辈之网 effect | 15–45s setTimeout 链 | clearTimeout |
+| NebulaWonders 温度 effect | 250ms 采样 tempRef 直写暖层 opacity | clearInterval |
+| NebulaWonders 悬停/触屏 effect | pointer 系列监听 + rAF 惯性插值（reduced 时不挂载） | cancelAnimationFrame + removeEventListener ×7 |
+| ServiceWorkerRegister effect | load 后注册 sw.js | removeEventListener |
 | whisperTimer | 字条延迟 | 卸载时 clearTimeout |
 
 长生命周期调度器通过 `rippleApiRef`（每次 render 同步为最新 `addRipple`）向状态层写入，避免闭包捕获旧 state。
@@ -322,10 +416,14 @@ npm run lint       # ESLint
 
 1. 点击星空空白：出现紫/青发光圆环，约 2.5s 消失；点输入框/恒星/字条**不**出涟漪。
 2. 输入 <10 字回车：青蓝快环、青白漂浮星尘、拨弦音；输入 ≥10 字：深紫慢巨环、琥珀下坠星尘、G1 低音。
-3. 回车后观察背景暖光，约 2.5 分钟完全冷却。
+3. 回车后观察背景暖光（热力层 + 星云暖层 4s 内「燃烧」为暗金琥珀），约 2.5 分钟完全冷却回深蓝。
 4. 刷新页面：恒星仍在（localStorage）。
 5. 等待 15–45s：屏幕边缘出现极淡涟漪并伴随遥远风铃。
-6. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
+6. 鼠标在星空间缓慢移动：附近星云被轻轻吸引、微微增亮，指尖有柔光跟随；移出窗口后缓慢回弹。
+7. 触屏（手机/模拟器）：手指按住星空拖动，光斑跟手、附近星云发亮；抬起熄灭。按在输入框上不触发。
+8. 切到其他标签页：标题变「…」，音频静默；切回恢复标题与音频。
+9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v1` activated；Network 勾选 Offline 刷新仍可打开。
+10. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
 
 > 自动化浏览器在隐藏标签页会冻结 rAF，测流星/冷却时确认 `document.visibilityState === "visible"`；浏览器脚本内 `await sleep` 累计超过约 15s 可能导致 evaluate 返回 undefined，拆成 6–8s 短脚本执行。
 
@@ -367,13 +465,17 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 ## 8. 约束与常见问题
 
-- **静态导出限制**：不能使用服务端 API、Route Handler、Next 图片优化（已 `unoptimized`）、服务端运行时依赖。
+- **静态导出限制**：不能使用服务端 API、Route Handler、Next 图片优化（已 `unoptimized`）、服务端运行时依赖；`manifest.ts` 必须 `export const dynamic = "force-static"`。
 - **tsparticles 必须 v4**：包名为 `@tsparticles/react` + `@tsparticles/slim`，用 `ParticlesProvider` 包裹 `Particles`。
 - **音频时间戳**：任何 Synth 触发都走 `claimTime()`。
 - **温度写 DOM 不写 state**：所有高频（rAF）视觉变化直写 style，防止 React 每秒 60 次重渲染。
+- **rAF 与 CSS transition 不写同一属性**：星云冷层 opacity 由 rAF 每帧驱动（无 transition），暖层 opacity 由 CSS 4s 过渡驱动（rAF 只低频写入）；混用会互相打架。
+- **动效层 DOM 解耦**：星云的视差/自转/呼吸/觉醒分别落在四层嵌套 div 上，互不争抢 transform。
+- **触屏合成事件防御**：`e.target` 可能是 window，调 `closest()` 前先 `typeof el.closest === "function"`。
+- **Service Worker scope**：部署在子路径时不要写死 `/sw.js`，用 `new URL("./sw.js", location.href)` 让 scope 天然限定在子路径。
 - **国内可达性**：优先 GitHub Pages 而非 Vercel 域名（后者在部分国内移动网络/微信内置浏览器中不可达）。
 - **旧组件勿误删**：`components/ZeroSpace|EmotionCanvas|DissolvingInput|WhisperPhrase` 与 `lib/*` 为历史版本，当前首页不引用；保留可追溯，清理应作为独立任务并先全量回归。
-- **可访问性**：`prefers-reduced-motion` 下自动事件降频、星云漂移动画与流光关闭；confetti `disableForReducedMotion`；viewport 禁止缩放是刻意的沉浸式取舍。
+- **可访问性**：`prefers-reduced-motion` 下自动事件降频、星云漂移/悬停交互/流光关闭；confetti `disableForReducedMotion`；viewport 禁止缩放是刻意的沉浸式取舍。
 
 ---
 
@@ -381,9 +483,14 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-02 | `850c7af` | 移动端陪伴：触屏拖动光斑 + PWA（manifest + SW + 深空图标）+ 标签隐藏 suspend 音频 + 标题静默「…」 |
+| 2026-10-01 | `8b4a9af` | 星云悬停增强：指尖唤醒光斑 + 悬停云觉醒吸气放大（1.04x） |
+| 2026-10-01 | `08dc9b1` | 星云悬停交互：鼠标靠近被吸引（视差偏移 + 惯性 LERP 0.045）与局部增亮，离开缓慢回弹 |
+| 2026-10-01 | `2b10d0b` | 星云奇观层：3 团宏大星云（blur 180-200px / screen 混合 / 120-170s 自转 / 28-40s 呼吸）/ 冷暖双层按星云温度 4s 交叉淡化 |
+| 2026-10-01 | `75f30d2` | 完整开发文档 |
 | 2026-10-01 | `94d0a53` | 输入框视觉：呼吸暖光 / 地平线发丝线 / 星点 / 流光 |
 | 2026-10-01 | `f26866d` | 终极重构：情绪自适应 + 星云热力学 + 同辈之网 |
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.0 · 生成于 2026-10-01，基于 commit 94d0a53 的代码现状。*
+*文档版本 v1.1 · 更新于 2026-10-02，基于 commit 850c7af 的代码现状。*
