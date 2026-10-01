@@ -298,6 +298,44 @@ export default function Home() {
     };
   }, [ensureAudio]);
 
+  /* ---- 标签页隐藏：挂起音频省电，标题静默为「…」；回来恢复 ---- */
+  useEffect(() => {
+    const TITLE = "归零 Zero";
+    let suspendedByUs = false;
+    const onVis = () => {
+      // 标题/状态先行，绝不依赖音频引擎是否已初始化
+      if (document.hidden) {
+        document.title = "…";
+        if (audioReady.current) {
+          try {
+            const ctx = Tone.getContext().rawContext as AudioContext;
+            if (ctx.state === "running") {
+              suspendedByUs = true;
+              ctx.suspend().catch(() => {});
+            }
+          } catch {
+            /* 音频上下文不可用时仅做标题变化 */
+          }
+        }
+      } else {
+        document.title = TITLE;
+        if (suspendedByUs && audioReady.current) {
+          suspendedByUs = false;
+          try {
+            (Tone.getContext().rawContext as AudioContext).resume().catch(() => {});
+          } catch {
+            /* 忽略 */
+          }
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      document.title = TITLE;
+    };
+  }, []);
+
   useEffect(
     () => () => {
       if (whisperTimer.current) clearTimeout(whisperTimer.current);

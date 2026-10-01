@@ -154,6 +154,8 @@ export default function NebulaWonders({
     const glowCur = { x: 0, y: 0, o: 0 };
 
     const onMove = (e: PointerEvent) => {
+      // 触屏只有手指按下拖动时才驱动；鼠标任意时刻都驱动（hover）
+      if (e.pointerType === "touch" && e.pointerId !== touchId) return;
       mouse.x = e.clientX;
       mouse.y = e.clientY;
     };
@@ -161,10 +163,29 @@ export default function NebulaWonders({
       mouse.x = -9999;
       mouse.y = -9999;
     };
+    // 触屏：手指落下开始照亮星云，抬起熄灭（控件上不触发）
+    let touchId: number | null = null;
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || touchId !== null) return;
+      const el = e.target as HTMLElement | null;
+      if (el && typeof el.closest === "function" && el.closest("input, textarea, button, a, [data-no-glow]")) return;
+      touchId = e.pointerId;
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    };
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType === "touch" && (touchId === null || e.pointerId === touchId)) {
+        touchId = null;
+        onLeave();
+      }
+    };
     const onResize = () => {
       centers = cloudCenters(window.innerWidth, window.innerHeight);
     };
+    window.addEventListener("pointerdown", onDown, { passive: true });
     window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
     window.addEventListener("pointerleave", onLeave);
     window.addEventListener("blur", onLeave);
     window.addEventListener("resize", onResize);
@@ -222,7 +243,10 @@ export default function NebulaWonders({
 
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       window.removeEventListener("pointerleave", onLeave);
       window.removeEventListener("blur", onLeave);
       window.removeEventListener("resize", onResize);
