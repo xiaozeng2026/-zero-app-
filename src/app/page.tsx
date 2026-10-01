@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * 「归零 (Zero)」— 宇宙深海 (Cosmic Ocean) 版情绪承接页
+ * 「归零 (Zero)」— 终极形态：宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网
  *
  * 视觉：#020111 深空底座 + 呼吸星云 + 150 颗失重星野（@tsparticles/react v4）
  * 涟漪：点击星空 → Framer Motion 暗紫/青能量波纹 scale 0→4，2.5s
- * 闭环：打字水滴 → 文字 blur 上浮溶解 → 暖金超新星光环 + confetti 星尘
- *       → 琥珀恒星落入星穹(localStorage) → 光影字条回响；陌生人流星/涟漪共鸣
- * 音律：Tone.js 深空 Drone + 13s 大混响颂钵 + C2 叹息 + 恒星五声音阶
+ * 自适应：字数 <10 青白轻粒子+Pluck 拨弦+快速涟漪；>=10 琥珀重坠粒子+G1 极低频+深紫巨波
+ * 热力学：回车加热星云，指数冷却半衰期 28s（约 2.5 分钟回冰冷深空）
+ * 同辈网：独立 15~45s 定时器，屏幕极边缘泛起 0.1~0.2 透明涟漪 + 22s 海量混响风铃
+ * 闭环：文字 blur 溶解 → 自适应星尘 → 琥珀恒星(localStorage) → 光影字条
  *
  * 全部逻辑集中在本文件；旧版组件仍保留在 src/components 中（未被引用）。
  */
@@ -38,7 +39,15 @@ const PENTA_HIGH = ["C5", "D5", "E5", "G5", "A5"] as const;
 const PENTA_MID = ["C4", "D4", "E4", "G4", "A4"] as const;
 
 const STAR_COLORS = ["#FBBF24", "#F59E0B", "#FDE68A", "#FB923C"];
-const CONFETTI_COLORS = ["#F59E0B", "#FBBF24", "#FDE68A", "#FB923C", "#FFF7ED"];
+/** 沉重情绪：暗金 / 琥珀 */
+const CONFETTI_HEAVY = ["#B45309", "#D97706", "#F59E0B", "#FBBF24", "#FDE68A"];
+/** 轻度情绪：青蓝 / 亮白 */
+const CONFETTI_LIGHT = ["#67E8F9", "#7DD3FC", "#BAE6FD", "#A5F3FC", "#FFFFFF"];
+
+/** 沉重情绪字数阈值 */
+const HEAVY_THRESHOLD = 10;
+/** 星云温度冷却半衰期（秒）：约 5 个半衰期 ≈ 2.5 分钟回到冰冷深空 */
+const NEBULA_COOL_HALFLIFE = 28;
 
 interface Star {
   id: string;
@@ -65,10 +74,15 @@ interface RippleFx {
   x: number;
   y: number;
   tone: RippleTone;
-  /** 超新星：更大更亮、带暖金 */
+  /** 超新星：更大更亮、带暖金（默认参数档位） */
   supernova: boolean;
   /** 陌生人自动涟漪：起始透明度更低 */
   dim: boolean;
+  /** 自适应覆盖项（不给则按 supernova/dim 取默认） */
+  size?: number;
+  scaleTo?: number;
+  duration?: number;
+  peak?: number;
 }
 
 /** 回车时正在溶解的文字 */
@@ -77,6 +91,8 @@ interface DissolveText {
   text: string;
   x: number;
   y: number;
+  /** 是否沉重情绪（字数 >= 10） */
+  heavy: boolean;
 }
 
 interface Meteor {
@@ -154,12 +170,22 @@ export default function Home() {
   /** 供长生命周期的共鸣调度器调用最新版 addRipple */
   const rippleApiRef = useRef<(r: Omit<RippleFx, "id">) => void>(() => {});
 
+  /* ---- 星云温度（0=冰冷深空，1=灼热）：仅 rAF 读写，不触发 React 渲染 ---- */
+  const nebulaTempRef = useRef(0);
+  const heatLayerRef = useRef<HTMLDivElement>(null);
+
   /* ---- Tone.js 句柄（首次手势后懒初始化） ---- */
   const audio = useRef<{
     reverb: Tone.Reverb;
+    /** 同辈之网专用：极长海量混响 */
+    massive: Tone.Reverb;
     drop: Tone.Synth;
     bass: Tone.Synth;
     bell: Tone.Synth;
+    /** 同辈风铃：送入 massive */
+    peerBell: Tone.Synth;
+    /** 轻度情绪：空灵拨弦 */
+    pluck: Tone.PluckSynth;
     droneGain: Tone.Gain;
   } | null>(null);
   const audioReady = useRef<Promise<void> | null>(null);
@@ -180,6 +206,12 @@ export default function Home() {
       const reverb = new Tone.Reverb({ decay: 13, wet: 0.72 });
       await reverb.generate();
       reverb.toDestination();
+
+      // 同辈之网专用：22 秒海量混响，像从宇宙边缘折返的回响
+      const massive = new Tone.Reverb({ decay: 22, wet: 0.92 });
+      await massive.generate();
+      const massiveBus = new Tone.Gain(0.5).toDestination();
+      massive.connect(massiveBus);
 
       // 极低音量低频 Drone：两支微失谐正弦 + 低通，模拟太空嗡鸣
       const droneGain = new Tone.Gain(0).toDestination();
@@ -204,13 +236,14 @@ export default function Home() {
         volume: -22,
       }).connect(reverb);
 
-      // 回车叹息：C2 正弦 Sub-bass
+      // 回车叹息：正弦 Sub-bass（沉重情绪触发 G1 极低频），同时入海量混响长尾
       const bass = new Tone.Synth({
         oscillator: { type: "sine" },
-        envelope: { attack: 0.03, decay: 1.2, sustain: 0.25, release: 3.5 },
-        volume: -10,
+        envelope: { attack: 0.04, decay: 1.6, sustain: 0.25, release: 4.5 },
+        volume: -9,
       }).toDestination();
       bass.connect(reverb);
+      bass.connect(massive);
 
       // 恒星悬停：空灵五声音阶
       const bell = new Tone.Synth({
@@ -219,7 +252,31 @@ export default function Home() {
         volume: -15,
       }).connect(reverb);
 
-      audio.current = { reverb, drop, bass, bell, droneGain };
+      // 轻度情绪：Karplus-Strong 拨弦，轻快空灵
+      const pluck = new Tone.PluckSynth({
+        attackNoise: 1.2,
+        dampening: 4200,
+        resonance: 0.92,
+        volume: -13,
+      }).connect(reverb);
+
+      // 同辈之网：极远处风铃，只进 22s 海量混响
+      const peerBell = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.02, decay: 2.2, sustain: 0, release: 4 },
+        volume: -19,
+      }).connect(massive);
+
+      audio.current = {
+        reverb,
+        massive,
+        drop,
+        bass,
+        bell,
+        peerBell,
+        pluck,
+        droneGain,
+      };
     })();
 
     return audioReady.current;
@@ -257,8 +314,8 @@ export default function Home() {
     }
   }, []);
 
-  /* ---- 在输入框位置放一束温暖星尘 ---- */
-  const burstStardust = useCallback(() => {
+  /* ---- 在输入框位置放一束星尘（按情绪重量自适应：轻=青白少而飘，重=琥珀多而坠） ---- */
+  const burstStardust = useCallback((heavy: boolean) => {
     const el = inputRef.current;
     const rect = el?.getBoundingClientRect();
     const origin = rect
@@ -269,33 +326,42 @@ export default function Home() {
       : { x: 0.5, y: 0.75 };
 
     const base: confetti.Options = {
-      colors: CONFETTI_COLORS,
+      colors: heavy ? CONFETTI_HEAVY : CONFETTI_LIGHT,
       shapes: ["circle"],
-      scalar: 0.9,
-      gravity: 0.55, // 低重力：星尘缓慢上浮飘散
-      decay: 0.94,
-      ticks: 220,
+      scalar: heavy ? 1.05 : 0.8,
+      // 沉重：重力明显下坠；轻度：近乎失重地漂浮
+      gravity: heavy ? 0.95 : 0.32,
+      decay: heavy ? 0.95 : 0.93,
+      ticks: heavy ? 300 : 200,
       disableForReducedMotion: true,
       zIndex: 60,
     };
 
     confetti({
       ...base,
-      particleCount: 70,
-      spread: 78,
-      startVelocity: 32,
+      particleCount: heavy ? 110 : 46,
+      spread: heavy ? 92 : 70,
+      startVelocity: heavy ? 40 : 28,
       origin,
     });
-    // 少量向上的"逃逸星尘"
+    // 向上的"逃逸星尘"：沉重情绪只有少量余烬向上
     confetti({
       ...base,
-      particleCount: 26,
+      particleCount: heavy ? 30 : 16,
       spread: 42,
-      startVelocity: 46,
+      startVelocity: heavy ? 42 : 44,
       angle: 270,
-      scalar: 0.7,
+      scalar: heavy ? 0.85 : 0.65,
       origin,
     });
+  }, []);
+
+  /* ---- 星云加热：回车瞬间把文字粉碎的能量传递给背景星云 ---- */
+  const heatNebula = useCallback((heavy: boolean) => {
+    nebulaTempRef.current = Math.min(
+      1,
+      nebulaTempRef.current + (heavy ? 0.55 : 0.26)
+    );
   }, []);
 
   /* ---- 取一个严格递增的音频时间戳（防同毫秒连触发报错） ---- */
@@ -388,14 +454,16 @@ export default function Home() {
       });
     };
 
-    /* ---- 陌生人共鸣：3~8s 一次，62% 暗紫/青涟漪 / 38% 流星 ---- */
+    /* ---- 近场共鸣：5~12s 一次，65% 流星 / 35% 暗涟漪（同辈之网另有独立慢循环） ---- */
     let echoTimer: ReturnType<typeof setTimeout>;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scheduleEcho = () => {
       echoTimer = setTimeout(
         () => {
           if (!document.hidden) {
-            if (Math.random() < 0.62) {
+            if (Math.random() < 0.65) {
+              spawnMeteor();
+            } else {
               rippleApiRef.current({
                 x: w * (0.12 + Math.random() * 0.76),
                 y: h * (0.16 + Math.random() * 0.55),
@@ -403,22 +471,45 @@ export default function Home() {
                 supernova: false,
                 dim: true,
               });
-            } else {
-              spawnMeteor();
             }
             playChime();
           }
           scheduleEcho();
         },
-        reduced ? 9000 + Math.random() * 6000 : 3000 + Math.random() * 5000
+        reduced ? 11000 + Math.random() * 8000 : 5000 + Math.random() * 7000
       );
     };
     scheduleEcho();
 
-    /* ---- 渲染循环：仅流星 ---- */
+    /* ---- 渲染循环：流星 + 星云温度指数冷却 ---- */
     let raf = 0;
-    const render = () => {
+    let lastTs: number | null = null;
+    let lastAppliedTemp = -1;
+    const render = (ts: number) => {
       const now = performance.now();
+
+      // 星云热力学：T(t) = T0 * 0.5^(dt/半衰期)，非线性、前段温吞后段悠长
+      if (lastTs !== null) {
+        const dt = Math.min(0.1, (ts - lastTs) / 1000);
+        if (nebulaTempRef.current > 0) {
+          nebulaTempRef.current *= Math.pow(
+            0.5,
+            dt / NEBULA_COOL_HALFLIFE
+          );
+          if (nebulaTempRef.current < 0.002) nebulaTempRef.current = 0;
+        }
+      }
+      lastTs = ts;
+
+      // 温度 → 暖光层 opacity / scale（直写 style，不走 React state）
+      const layer = heatLayerRef.current;
+      if (layer && Math.abs(nebulaTempRef.current - lastAppliedTemp) > 0.003) {
+        const t = nebulaTempRef.current;
+        lastAppliedTemp = t;
+        layer.style.opacity = (t * 0.85).toFixed(3);
+        layer.style.transform = `scale(${(1 + t * 0.22).toFixed(3)})`;
+      }
+
       ctx.clearRect(0, 0, w, h);
       ctx.globalCompositeOperation = "lighter";
 
@@ -465,6 +556,56 @@ export default function Home() {
     };
   }, [claimTime]);
 
+  /* ---- 同辈之网：独立慢循环 15~45s，屏幕极边缘的微弱时空波动 + 海量混响风铃 ---- */
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+
+    /** 取屏幕四条极边缘带内的一个坐标 */
+    const edgePoint = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const bandX = w * 0.08;
+      const bandY = h * 0.12;
+      const side = Math.floor(Math.random() * 4);
+      switch (side) {
+        case 0:
+          return { x: Math.random() * bandX, y: Math.random() * h };
+        case 1:
+          return { x: w - Math.random() * bandX, y: Math.random() * h };
+        case 2:
+          return { x: Math.random() * w, y: Math.random() * bandY };
+        default:
+          return { x: Math.random() * w, y: h - Math.random() * bandY };
+      }
+    };
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (!document.hidden) {
+          const { x, y } = edgePoint();
+          rippleApiRef.current({
+            x,
+            y,
+            tone: Math.random() < 0.6 ? "violet" : "cyan",
+            supernova: false,
+            dim: true,
+            // 极远处传来：更小、更慢、近乎透明
+            size: 105,
+            scaleTo: 2.8,
+            duration: 3.8,
+            peak: 0.1 + Math.random() * 0.1,
+          });
+          const note = PENTA_MID[Math.floor(Math.random() * PENTA_MID.length)];
+          audio.current?.peerBell.triggerAttackRelease(note, "2n", claimTime());
+        }
+        schedule();
+      }, 15000 + Math.random() * 30000);
+    };
+    schedule();
+
+    return () => clearTimeout(timer);
+  }, [claimTime]);
+
   /* ---- 恒星悬停：放大发亮 + 五声音阶 ---- */
   const touchStar = useCallback(() => {
     const now = Tone.now();
@@ -474,16 +615,41 @@ export default function Home() {
     audio.current?.bell.triggerAttackRelease(note, "2n", claimTime());
   }, [claimTime]);
 
-  /* ---- 文字溶解结束 → 超新星 + 星尘 + 恒星（情绪彻底释放） ---- */
+  /* ---- 文字溶解结束 → 自适应涟漪 + 星尘 + 恒星（情绪彻底释放） ---- */
   const releaseEmotion = useCallback(
     (d: DissolveText) => {
       setDissolve(null);
 
-      // 超新星能量光环：更大、更亮、暖金
-      addRipple({ x: d.x, y: d.y, tone: "gold", supernova: true, dim: false });
+      if (d.heavy) {
+        // 沉重情绪：极其缓慢、巨大的深紫色能量涟漪（scale→6.5 / 4.4s）
+        addRipple({
+          x: d.x,
+          y: d.y,
+          tone: "violet",
+          supernova: false,
+          dim: false,
+          size: 200,
+          scaleTo: 6.5,
+          duration: 4.4,
+          peak: 0.72,
+        });
+      } else {
+        // 轻度情绪：青蓝快速小涟漪，像一声清脆的叹息
+        addRipple({
+          x: d.x,
+          y: d.y,
+          tone: "cyan",
+          supernova: false,
+          dim: false,
+          size: 120,
+          scaleTo: 3.4,
+          duration: 1.7,
+          peak: 0.55,
+        });
+      }
 
-      // 温暖星尘
-      burstStardust();
+      // 按重量自适应的星尘（青白漂浮 / 琥珀下坠）
+      burstStardust(d.heavy);
 
       // 一颗明亮恒星落入上半屏星穹
       const star: Star = {
@@ -500,7 +666,7 @@ export default function Home() {
     [addRipple, burstStardust, persistStars, stars]
   );
 
-  /* ---- 提交情绪：文字先在原位 blur 溶解，释放后再超新星爆发 ---- */
+  /* ---- 提交情绪：文字 blur 溶解；声学与物理按字数自适应 ---- */
   const submitEmotion = useCallback(() => {
     const text = value.trim();
     if (!text) return;
@@ -509,16 +675,28 @@ export default function Home() {
     const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
     const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.87;
 
+    // 情绪重量：字数 >=10 为沉重
+    const heavy = text.length >= HEAVY_THRESHOLD;
+
     setValue("");
 
-    // C2 下潜叹息随文字溶解起声
-    audio.current?.bass.triggerAttackRelease("C2", "2n", claimTime());
+    // 能量传递给星云：沉重更烫
+    heatNebula(heavy);
 
-    // 文字本体留在原位，模糊上浮地溶解
+    if (heavy) {
+      // G1（49Hz）极低频叹息，经 22s 海量混响沉入深空
+      audio.current?.bass.triggerAttackRelease("G1", "1n", claimTime());
+    } else {
+      // 空灵拨弦：高把位五声音阶
+      const note = PENTA_HIGH[Math.floor(Math.random() * PENTA_HIGH.length)];
+      audio.current?.pluck.triggerAttackRelease(note, "8n", claimTime());
+    }
+
+    // 文字本体留在原位，模糊上浮地溶解（沉重时溶解更慢）
     dissolveSeq.current += 1;
-    setDissolve({ id: dissolveSeq.current, text, x, y });
+    setDissolve({ id: dissolveSeq.current, text, x, y, heavy });
 
-    // 超新星爆发的同时，深空飘来一句光影字条（不连续重复）
+    // 释放的同时，深空飘来一句光影字条（不连续重复）
     if (whisperTimer.current) clearTimeout(whisperTimer.current);
     whisperTimer.current = setTimeout(() => {
       let phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
@@ -530,7 +708,7 @@ export default function Home() {
       lastPhrase.current = phrase;
       setWhisper({ id: Date.now(), text: phrase });
     }, 1050);
-  }, [value, claimTime]);
+  }, [value, claimTime, heatNebula]);
 
   /* ---- 打字反馈：仅在"新增字符"时响水滴 ---- */
   const handleChange = (next: string) => {
@@ -548,6 +726,18 @@ export default function Home() {
   return (
     <main className="fixed inset-0 overflow-hidden bg-black font-sans">
       <StarfieldBackground />
+
+      {/* 星云热力层：吸收文字粉碎能量后的暗红/琥珀暖光，rAF 直写 opacity/scale */}
+      <div
+        ref={heatLayerRef}
+        aria-hidden
+        className="pointer-events-none fixed inset-[-15%] z-[-9] opacity-0 will-change-[opacity,transform]"
+        style={{
+          background:
+            "radial-gradient(ellipse 72% 58% at 50% 46%, rgba(255,150,70,0.17) 0%, rgba(190,60,30,0.13) 38%, rgba(120,20,25,0.06) 58%, rgba(0,0,0,0) 74%)",
+          filter: "blur(70px)",
+        }}
+      />
 
       {/* 流星拖尾：在星空之上，不拦截任何点击 */}
       <canvas ref={fxCanvasRef} aria-hidden className="pointer-events-none fixed inset-0 z-[5]" />
@@ -628,7 +818,10 @@ export default function Home() {
               x: "-50%",
               y: "-68%",
             }}
-            transition={{ duration: 1, ease: "easeInOut" }}
+            transition={{
+              duration: dissolve.heavy ? 1.5 : 1,
+              ease: "easeInOut",
+            }}
             onAnimationComplete={() => releaseEmotion(dissolve)}
           >
             <span
@@ -702,12 +895,18 @@ function RippleWave({
   onDone: () => void;
 }) {
   const tone = RIPPLE_TONES[ripple.tone];
-  const size = ripple.supernova ? 170 : 130;
-  const endScale = ripple.supernova ? 6 : 4;
-  const dur = ripple.supernova ? 3.2 : 2.5;
-  const peak = ripple.supernova ? 0.85 : ripple.dim ? 0.38 : 0.6;
-  const glowPx = ripple.supernova ? 44 : 20;
-  const glowSpread = ripple.supernova ? 8 : 2;
+  const size = ripple.size ?? (ripple.supernova ? 170 : 130);
+  const endScale = ripple.scaleTo ?? (ripple.supernova ? 6 : 4);
+  const dur = ripple.duration ?? (ripple.supernova ? 3.2 : 2.5);
+  const peak =
+    ripple.peak ?? (ripple.supernova ? 0.85 : ripple.dim ? 0.38 : 0.6);
+  // 辉光随扩散尺度增强（深紫巨波最盛，同辈涟漪最弱）
+  const glowPx = Math.max(
+    12,
+    Math.min(46, Math.round(9 + endScale * (ripple.supernova ? 6 : 4.6)))
+  );
+  const glowSpread = endScale >= 5.5 ? 8 : 2;
+  const innerGlow = endScale >= 5.5 ? 40 : 22;
 
   return (
     <div className="absolute" style={{ left: ripple.x, top: ripple.y }}>
@@ -723,9 +922,7 @@ function RippleWave({
               marginLeft: -size / 2,
               marginTop: -size / 2,
               border: `${outer ? 1.5 : 1}px solid ${tone.border}`,
-              boxShadow: `0 0 ${glowPx}px ${glowSpread}px ${tone.glow}, inset 0 0 ${
-                ripple.supernova ? 40 : 22
-              }px ${tone.glow}`,
+              boxShadow: `0 0 ${glowPx}px ${glowSpread}px ${tone.glow}, inset 0 0 ${innerGlow}px ${tone.glow}`,
               background: `radial-gradient(circle, ${tone.core} 0%, transparent 72%)`,
               willChange: "transform, opacity",
             }}
