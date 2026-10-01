@@ -131,6 +131,8 @@ export default function NebulaWonders({
   const hotLayersRef = useRef<(HTMLDivElement | null)[]>([]);
   const coldLayersRef = useRef<(HTMLDivElement | null)[]>([]);
   const parallaxRef = useRef<(HTMLDivElement | null)[]>([]);
+  const wakeRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const cursorGlowRef = useRef<HTMLDivElement | null>(null);
   // 仅客户端判定减弱动效（避免 SSR 预渲染期访问 window）
   const [reduced, setReduced] = useState(false);
 
@@ -139,14 +141,17 @@ export default function NebulaWonders({
     setReduced(mq.matches);
   }, []);
 
-  /* 鼠标悬停交互：靠近的星云被轻轻吸引（视差）并微微增亮，
+  /* 鼠标悬停交互：靠近的星云被轻轻吸引（视差）、微微增亮、
+     轻微「吸气」放大；指尖同时在雾中投下一团跟随的唤醒光斑。
      全程 ref + rAF 惯性插值，零 React 重渲染 */
   useEffect(() => {
     if (reduced) return;
     let centers = cloudCenters(window.innerWidth, window.innerHeight);
     const mouse = { x: -9999, y: -9999 };
     // 每团云独立的当前值（目标值实时由鼠标推导）
-    const cur = CLOUDS.map(() => ({ x: 0, y: 0, glow: 0 }));
+    const cur = CLOUDS.map(() => ({ x: 0, y: 0, glow: 0, wake: 0 }));
+    // 光斑自身的惯性位置（比云更「贴手」，lerp 稍大）
+    const glowCur = { x: 0, y: 0, o: 0 };
 
     const onMove = (e: PointerEvent) => {
       mouse.x = e.clientX;
@@ -164,9 +169,14 @@ export default function NebulaWonders({
     window.addEventListener("blur", onLeave);
     window.addEventListener("resize", onResize);
 
+    glowCur.x = window.innerWidth / 2;
+    glowCur.y = window.innerHeight / 2;
+
     let raf = 0;
     const LERP = 0.045; // 小系数 = 沉重的惯性，星云「缓慢回应」
+    const GLOW_LERP = 0.12; // 光斑更贴手
     const loop = () => {
+      let maxProx = 0;
       for (let i = 0; i < CLOUDS.length; i++) {
         const c = CLOUDS[i];
         const ctr = centers[i];
@@ -175,6 +185,7 @@ export default function NebulaWonders({
         const dist = Math.hypot(dx, dy);
         // 感应强度：云心为 1，感应半径外线性衰减到 0
         const prox = Math.max(0, 1 - dist / (ctr.r * 1.6));
+        if (prox > maxProx) maxProx = prox;
         // 视差目标：朝鼠标方向被吸引，上限 parallax px
         const tx = dist > 1 ? (dx / dist) * c.parallax * prox : 0;
         const ty = dist > 1 ? (dy / dist) * c.parallax * prox : 0;
@@ -182,6 +193,8 @@ export default function NebulaWonders({
         st.x += (tx - st.x) * LERP;
         st.y += (ty - st.y) * LERP;
         st.glow += (c.hoverGlow * prox - st.glow) * LERP;
+        // 觉醒：悬停云轻微吸气放大，最多 +4%
+        st.wake += (prox * 0.04 - st.wake) * LERP;
 
         const p = parallaxRef.current[i];
         if (p) p.style.transform = `translate3d(${st.x.toFixed(2)}px, ${st.y.toFixed(2)}px, 0)`;
@@ -189,6 +202,19 @@ export default function NebulaWonders({
         if (cold) {
           cold.style.opacity = Math.min(1, c.coldAlpha + st.glow).toFixed(3);
         }
+        const wake = wakeRefs.current[i];
+        if (wake) wake.style.transform = `scale(${(1 + st.wake).toFixed(4)})`;
+      }
+      // 唤醒光斑：跟随指尖，强度 = 最近云的感应度
+      const targetX = mouse.x < -1000 ? glowCur.x : mouse.x;
+      const targetY = mouse.y < -1000 ? glowCur.y : mouse.y;
+      glowCur.x += (targetX - glowCur.x) * GLOW_LERP;
+      glowCur.y += (targetY - glowCur.y) * GLOW_LERP;
+      glowCur.o += ((mouse.x < -1000 ? 0 : maxProx) - glowCur.o) * GLOW_LERP;
+      const g = cursorGlowRef.current;
+      if (g) {
+        g.style.transform = `translate3d(${glowCur.x.toFixed(2)}px, ${glowCur.y.toFixed(2)}px, 0) translate(-50%, -50%) scale(${(0.85 + glowCur.o * 0.3).toFixed(3)})`;
+        g.style.opacity = (glowCur.o * 0.55).toFixed(3);
       }
       raf = requestAnimationFrame(loop);
     };
@@ -259,38 +285,63 @@ export default function NebulaWonders({
               delay: c.delay,
             }}
           >
-            {/* 冷色层：常驻的冰冷星云（静态 blur，浏览器只栅格化一次） */}
+            {/* 觉醒层：悬停时整团云轻微吸气放大（rAF 直写 scale） */}
             <div
               ref={(el) => {
-                coldLayersRef.current[i] = el;
+                wakeRefs.current[i] = el;
               }}
-              className="absolute inset-0"
-              style={{
-                background: c.cold,
-                filter: `blur(${c.blur}px)`,
-                opacity: c.coldAlpha,
-                willChange: "opacity",
-                // 不加 CSS transition——rAF 每帧直写 opacity，lerp 本身就是平滑的
-              }}
-            />
-            {/* 暖色层：跟随星云温度交叉淡入，4s 过渡 = 3~5 秒「燃烧」 */}
-            <div
-              ref={(el) => {
-                hotLayersRef.current[i] = el;
-              }}
-              className="absolute inset-0"
-              style={{
-                background: c.hot,
-                filter: `blur(${c.blur}px)`,
-                opacity: 0,
-                transition: "opacity 4s ease-in-out",
-                willChange: "opacity",
-              }}
-            />
+              className="absolute inset-0 will-change-transform"
+            >
+              {/* 冷色层：常驻的冰冷星云（静态 blur，浏览器只栅格化一次） */}
+              <div
+                ref={(el) => {
+                  coldLayersRef.current[i] = el;
+                }}
+                className="absolute inset-0"
+                style={{
+                  background: c.cold,
+                  filter: `blur(${c.blur}px)`,
+                  opacity: c.coldAlpha,
+                  willChange: "opacity",
+                  // 不加 CSS transition——rAF 每帧直写 opacity，lerp 本身就是平滑的
+                }}
+              />
+              {/* 暖色层：跟随星云温度交叉淡入，4s 过渡 = 3~5 秒「燃烧」 */}
+              <div
+                ref={(el) => {
+                  hotLayersRef.current[i] = el;
+                }}
+                className="absolute inset-0"
+                style={{
+                  background: c.hot,
+                  filter: `blur(${c.blur}px)`,
+                  opacity: 0,
+                  transition: "opacity 4s ease-in-out",
+                  willChange: "opacity",
+                }}
+              />
+            </div>
           </motion.div>
         </motion.div>
         </div>
       ))}
+
+      {/* 指尖唤醒光斑：跟随鼠标的柔和辉光，只在靠近星云时亮起，
+          screen 混合下像把手伸进宇宙雾霭里照亮它 */}
+      <div
+        ref={cursorGlowRef}
+        className="pointer-events-none absolute left-0 top-0 will-change-transform"
+        style={{
+          width: "52vmin",
+          height: "52vmin",
+          borderRadius: "9999px",
+          background:
+            "radial-gradient(circle, rgba(206,236,255,0.16) 0%, rgba(165,180,252,0.08) 38%, rgba(196,181,253,0.03) 60%, transparent 72%)",
+          filter: "blur(28px)",
+          opacity: 0,
+          mixBlendMode: "screen",
+        }}
+      />
     </div>
   );
 }
