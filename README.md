@@ -4,7 +4,7 @@
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
 > 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA × 生物钟 × 触觉 × 环保休眠」
-> 文档更新日期：2026-10-02（基于 commit 13f855f）
+> 文档更新日期：2026-10-02（基于 commit eda781b）
 
 ---
 
@@ -515,7 +515,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 ## 8. 约束与常见问题
 
 - **静态导出限制**：不能使用服务端 API、Route Handler、Next 图片优化（已 `unoptimized`）、服务端运行时依赖；`manifest.ts` 必须 `export const dynamic = "force-static"`。
-- **tsparticles 必须 v4**：包名为 `@tsparticles/react` + `@tsparticles/slim`，用 `ParticlesProvider` 包裹 `Particles`。
+- **tsparticles 必须 v4**：包名为 `@tsparticles/react` + `@tsparticles/slim`，用 `ParticlesProvider` 包裹 `Particles`。**`init` 回调必须是模块级常量**（引用全生命周期稳定）——组件一旦因 props（如 phase/paused）重渲染，行内 `init={async ...}` 会让引擎直接抛 `init callback must be stable`。
 - **音频时间戳**：任何 Synth 触发都走 `claimTime()`。
 - **温度写 DOM 不写 state**：所有高频（rAF）视觉变化直写 style，防止 React 每秒 60 次重渲染。
 - **rAF 与 CSS transition 不写同一属性**：星云冷层 opacity 由 rAF 每帧驱动（无 transition），暖层 opacity 由 CSS 4s 过渡驱动（rAF 只低频写入）；混用会互相打架。
@@ -537,6 +537,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-02 | `eda781b` | 修复：ParticlesProvider init 提为模块级常量（接入 props 后重渲染致 init 引用变化、tsparticles 引擎抛错） |
 | 2026-10-02 | `13f855f` | 底层质感三增强：触觉反馈（Vibration）/ 生物钟环境（circadian token：底色薄纱+星速+波纹+混响+Drone）/ 环保休眠（Drone 淡出挂起 + tsparticles 暂停 + 1.3s 回归薄纱） |
 | 2026-10-02 | `28c90f2` | 重构：删除 7 个旧组件死代码（净 -1355 行）/ page.tsx 拆为音频引擎+星穹存储+特效层三模块 / 修复 IME 组词回车误提交 |
 | 2026-10-02 | `7a2574c` | README v1.1：补充星云奇观层/悬停触屏/PWA/可见性四模块 |
@@ -550,4 +551,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.3 · 更新于 2026-10-02，基于 commit 13f855f 的代码现状（生物钟 / 触觉 / 环保休眠）。*
+*文档版本 v1.3 · 更新于 2026-10-02，基于 commit eda781b 的代码现状（生物钟 / 触觉 / 环保休眠）。*
