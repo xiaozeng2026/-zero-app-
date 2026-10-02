@@ -3,8 +3,8 @@
 > 一片可以把情绪丢进去的浩瀚深空。
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
-> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA」
-> 文档更新日期：2026-10-02（基于 commit 28c90f2）
+> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA × 生物钟 × 触觉 × 环保休眠」
+> 文档更新日期：2026-10-02（基于 commit 13f855f）
 
 ---
 
@@ -67,9 +67,13 @@ zero-app/
     │   └── ServiceWorkerRegister.tsx # ★ load 后注册 sw.js（静默失败）
     ├── hooks/
     │   ├── useStarStorage.ts      # ★ 星穹存储：localStorage 恒星日记（增查限流）
-    │   └── useFxLayer.tsx         # ★ 特效层：涟漪/溶解/流星/热力/星尘/调度器 + RippleWave
+    │   ├── useFxLayer.tsx         # ★ 特效层：涟漪/溶解/流星/热力/星尘/调度器 + RippleWave
+    │   ├── useCircadianPhase.ts   # ★ 生物钟时段（深夜/白天/傍晚，边界自动切换）
+    │   └── usePageVisibility.ts   # ★ 标签页可见性（useSyncExternalStore 订阅）
     └── lib/
-        └── audioEngine.ts         # ★ 音频引擎：Tone.js 单例（Drone/水滴/拨弦/Bass/双混响）
+        ├── audioEngine.ts         # ★ 音频引擎：Tone.js 单例（Drone/水滴/拨弦/Bass/双混响/生物钟/休眠）
+        ├── circadian.ts           # ★ 生物钟 token 单一事实源（星速/波纹/底色/混响/Drone）
+        └── haptics.ts             # ★ 触觉反馈（Vibration API 封装，iOS 静默无效）
 ```
 
 代码分四块：
@@ -124,6 +128,7 @@ flowchart TB
 | `20` | 光影字条 + 溶解文字 | 居中浮字 |
 | `30` | 输入框 | 唯一可交互控件 |
 | `60` | confetti | 星尘爆裂（canvas-confetti 内置 zIndex） |
+| `70` | 回归薄纱 | 从后台切回时 1.3s 黑纱缓出（环保休眠唤醒） |
 
 所有特效层默认 `pointer-events: none`；点击交互通过 **window 上的 `pointerup` 监听**统一处理，并对 `input, button, a, p` 做豁免。
 
@@ -379,14 +384,22 @@ interface Star {
 
 **注册 `ServiceWorkerRegister.tsx`**：`"use client"` 空组件，`load` 事件后 `navigator.serviceWorker.register(new URL("./sw.js", location.href))`，`catch` 静默——非安全上下文（如 file://）或禁用时不影响任何功能。挂在 `layout.tsx` body 尾部。
 
-### 5.12 标签页可见性：隐藏时静默
+### 5.12 标签页可见性与环保休眠（usePageVisibility）
 
-`page.tsx` 中的 `visibilitychange` effect（挂载一次）：
+`src/hooks/usePageVisibility.ts` 用 `useSyncExternalStore` 订阅 `visibilitychange`，返回 `document.hidden`，无轮询。`page.tsx` 据此驱动休眠/唤醒（标题变化与音频解耦，引擎未初始化也安全）：
 
-- **隐藏时**：`document.title = "…"`（极简静默信号）；若音频已初始化且 `AudioContext.state === "running"`，记录 `suspendedByUs = true` 并 `ctx.suspend()` 省电。
-- **恢复时**：标题还原 `"归零 Zero"`；仅当是我们挂起的才 `ctx.resume()`（不打断用户在其他标签页的音频状态）。
-- **标题先行**：标题变化不依赖音频引擎是否已初始化（`audioReady.current` 判空），音频部分整体 `try/catch` 静默。
-- 卸载时移除监听并把标题还原。
+**切走 / 后台 / 锁屏（hidden）**：
+
+- `document.title = "…"`（极简静默信号）；
+- `sleepAudio()`：Drone gain 在 **0.5s 内线性淡出到近零** → 挂起整个 `AudioContext`（混响长尾一并冻结、释放音频硬件）；
+- `<StarfieldBackground paused>`：`container.pause()` 暂停 tsparticles 渲染循环（CPU/GPU 降载）；
+- 流星 canvas 的 rAF 由浏览器在隐藏标签页自动节流，两个共鸣调度器本来就有 `document.hidden` 闸门，不额外处理。
+
+**切回（visible）**：
+
+- `wakeAudio()`：必要时先 `ctx.resume()`，Drone 从寂静在 **1.6s 内线性淡入**到当前时段目标音量；若用户在 0.6s 挂起窗口内快速切回则取消挂起、只做音量回弹；
+- 粒子 `container.play()` 恢复；
+- 一层纯黑薄纱（z-70）**1.3s 缓出**，画面与声音同步温柔回归，杜绝突然吵闹/刺眼。薄纱纪元（veilEpoch）在渲染期检测 `hidden` 翻转推进，首挂不触发。
 
 ### 5.13 副作用生命周期清单
 
@@ -394,16 +407,41 @@ interface Star {
 |---|---|---|
 | 启动 effect（useStarStorage） | 读取 localStorage 星穹 | 无需清理 |
 | 音频解锁 effect（page.tsx） | 首次手势 `ensureAudio()` | removeEventListener |
-| 可见性 effect（page.tsx） | 标题静默 + suspend/resume 音频 | removeEventListener + 标题还原 |
-| 点击涟漪 effect（useFxLayer） | window pointerup | removeEventListener |
+| 生物钟 effect（page.tsx） | phase 变化 → `applyCircadianPhase()`（参数 4s 平滑） | 无需清理 |
+| useCircadianPhase 定时器 | 到下一边界（00/06/19 点）后切换时段 | clearTimeout |
+| 可见性 effect（page.tsx） | 标题静默 + sleepAudio/wakeAudio | 无（单页不卸载） |
+| 点击涟漪 effect（useFxLayer） | window pointerup + 触觉 tick | removeEventListener |
 | Canvas effect（useFxLayer） | resize、rAF 流星+温度冷却、近场共鸣 setTimeout | cancelAnimationFrame + clearTimeout + removeEventListener |
 | 同辈之网 effect（useFxLayer） | 15–45s setTimeout 链 | clearTimeout |
+| 星空暂停 effect（StarfieldBackground） | paused 变化 → tsparticles container pause/play | 无需清理 |
 | NebulaWonders 温度 effect | 250ms 采样 tempRef 直写暖层 opacity | clearInterval |
 | NebulaWonders 悬停/触屏 effect | pointer 系列监听 + rAF 惯性插值（reduced 时不挂载） | cancelAnimationFrame + removeEventListener ×7 |
 | ServiceWorkerRegister effect | load 后注册 sw.js | removeEventListener |
 | whisperTimer（page.tsx） | 字条延迟 | 卸载时 clearTimeout |
 
 长生命周期调度器通过 `rippleApiRef`（每次 render 同步为最新 `addRipple`）向状态层写入，避免闭包捕获旧 state。
+
+### 5.14 生物钟环境微调（Circadian Ambience）
+
+`src/lib/circadian.ts` 是**全天参数唯一事实源**（token 化，各视觉/音频层只消费、不硬编码时段值）：
+
+| 时段（本地时间） | 底色薄纱 | 星尘漂浮速度 | 波纹节奏 | 星云 | 主混响 | Drone 音量 | Drone 低通 LFO |
+|---|---|---|---|---|---|---|---|
+| night 深夜 00–05 | 纯黑 0.55（压成近纯黑） | 0.06–0.18（最慢） | 1.08× 沉缓 | ×0.82 压暗 | 0.82 最大 | 0.040 最远 | 80–180Hz 闷 |
+| day 白天 06–18 | 深海蓝 `#0a1c3d` 0.28 微透 | 0.12–0.36 稍快 | 0.92× 轻快 | 1.00 | 0.66 稍干 | 0.052 稍清晰 | 130–280Hz 透 |
+| evening 傍晚 19–23 | 无薄纱（基准态） | 0.10–0.30 | 1.00× | 1.00 | 0.72 | 0.045 | 90–220Hz |
+
+- `useCircadianPhase()`：初始按时长判定，并 setTimeout 到下一边界（00:00/06:00/19:00）后自动切换——页面整夜不关也能在凌晨 6 点自然"天亮"。
+- **底色过渡**：CSS 渐变不可平滑插值，因此在固定渐变上盖一层纯色薄纱，用 `opacity 3s transition` 换天，无闪烁。
+- **星速切换**：options 变化触发 tsparticles 容器重建（一天最多 2 次，发生在整点边界）。
+- **音频切换**：`applyCircadianPhase()` 对 `reverb.wet`/`droneGain.gain` 做 4s `rampTo`，LFO `min/max` 数值 setter 即时改区间；引擎未初始化时缓存 phase，`ensureAudio()` 末尾按当前时段构建。
+
+### 5.15 触觉反馈（Haptic Resonance）
+
+`src/lib/haptics.ts` 对 Vibration API 的极简封装（try/catch 防御跨域 iframe；iOS Safari 无此 API，静默无效）：
+
+- **点击涟漪**：`navigator.vibrate(10)`——极轻一啄。只挂在 window pointerup 监听里；近场共鸣/同辈之网的自动涟漪走 `rippleApiRef`，**不会误震**。
+- **回车粉碎**：字数 <10 → `vibrate(20)` 短震；字数 ≥10 → `vibrate([30,50,30])` 震-停-震，模拟重物落地的物理回弹。
 
 ---
 
@@ -432,7 +470,9 @@ npm run lint       # ESLint
 8. 切到其他标签页：标题变「…」，音频静默；切回恢复标题与音频。
 9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v1` activated；Network 勾选 Offline 刷新仍可打开。
 10. 中文输入法组词中按回车：仅确认拼音/选字，不提交情绪；整词上屏后只响一声水滴。
-11. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
+11. 生物钟：按当前本地时间整站氛围不同（深夜更黑更慢混响更大）；可临时改系统时间跨边界验证自动换天。
+12. 切走标签页：标题变「…」，DevTools 可见 tsparticles 暂停、AudioContext suspended；切回时黑纱缓出、Drone 平滑淡入。
+13. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
 
 > 自动化浏览器在隐藏标签页会冻结 rAF，测流星/冷却时确认 `document.visibilityState === "visible"`；浏览器脚本内 `await sleep` 累计超过约 15s 可能导致 evaluate 返回 undefined，拆成 6–8s 短脚本执行。
 
@@ -485,6 +525,10 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 - **国内可达性**：优先 GitHub Pages 而非 Vercel 域名（后者在部分国内移动网络/微信内置浏览器中不可达）。
 - **隐私**：全应用无后端、无统计、无网络请求（除 GitHub Pages 静态资源本身）；星穹日记只存本机 localStorage，同辈之网为本地模拟。
 - **IME**：受控 input 必须在组词期间正常 `setValue`，回车提交须过 composition 守卫（见 5.10）。
+- **生物钟 token 单一事实源**：所有时段参数只准写在 `src/lib/circadian.ts`，组件经 props 消费；新增随时间变化的视觉/音频参数时往 token 表加一列，勿在组件里判小时。
+- **渐变不可过渡**：背景换天用纯色薄纱 opacity 过渡，不要指望 `transition: background` 插值渐变。
+- **休眠淡出先于挂起**：先 ramp gain（≥0.5s）再 `ctx.suspend()`，恢复必须 `resume()` 之后再排淡入曲线（挂起期间 Tone 传输时间不前进）。
+- **触觉只跟真人手势**：自动涟漪（近场共鸣/同辈网）严禁调用振动，只有用户 pointerup/提交可震；Vibration API 不可用时静默。
 - **可访问性**：`prefers-reduced-motion` 下自动事件降频、星云漂移/悬停交互/流光关闭；confetti `disableForReducedMotion`；viewport 禁止缩放是刻意的沉浸式取舍。
 
 ---
@@ -493,6 +537,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-02 | `13f855f` | 底层质感三增强：触觉反馈（Vibration）/ 生物钟环境（circadian token：底色薄纱+星速+波纹+混响+Drone）/ 环保休眠（Drone 淡出挂起 + tsparticles 暂停 + 1.3s 回归薄纱） |
 | 2026-10-02 | `28c90f2` | 重构：删除 7 个旧组件死代码（净 -1355 行）/ page.tsx 拆为音频引擎+星穹存储+特效层三模块 / 修复 IME 组词回车误提交 |
 | 2026-10-02 | `7a2574c` | README v1.1：补充星云奇观层/悬停触屏/PWA/可见性四模块 |
 | 2026-10-02 | `850c7af` | 移动端陪伴：触屏拖动光斑 + PWA（manifest + SW + 深空图标）+ 标签隐藏 suspend 音频 + 标题静默「…」 |
@@ -505,4 +550,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.2 · 更新于 2026-10-02，基于 commit 28c90f2 的代码现状（模块化重构后）。*
+*文档版本 v1.3 · 更新于 2026-10-02，基于 commit 13f855f 的代码现状（生物钟 / 触觉 / 环保休眠）。*
