@@ -455,7 +455,10 @@ npm install        # 安装依赖
 npm run dev        # http://localhost:3000，BASE_PATH 留空
 npm run build      # 静态导出到 out/
 npm run lint       # ESLint
+npm test           # Vitest 单测（jsdom，src/**/*.test.{ts,tsx}）
 ```
+
+单测覆盖生物钟纯逻辑（`src/lib/circadian.test.ts`：时段边界、下一边界毫秒数、token 表单调性）与水合不变量（`src/hooks/useCircadianPhase.test.tsx`：首帧恒为 evening、挂载后同步真实时段、定时器跨边界换天、卸载清理）——后者是 e746577 SSG 相位漂移的回归守卫。
 
 无环境变量、无后端服务、无数据库。`BASE_PATH` 仅在构建期使用（见下节），本地开发不需要设置。
 
@@ -539,6 +542,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-03 | `960ab17` | 测试：引入 Vitest + jsdom + Testing Library；生物钟单测 24 例（纯逻辑 + 水合不变量回归守卫，变异验证旧实现必红） |
 | 2026-10-03 | `e746577` | 修复：生物钟时段 SSG/水合相位漂移（初值固定 evening，挂载后注入本地时段；深夜访客此前看到的是构建机 UTC 白天蓝纱）；.sim-root 加入 eslint ignores |
 | 2026-10-02 | `eda781b` | 修复：ParticlesProvider init 提为模块级常量（接入 props 后重渲染致 init 引用变化、tsparticles 引擎抛错） |
 | 2026-10-02 | `13f855f` | 底层质感三增强：触觉反馈（Vibration）/ 生物钟环境（circadian token：底色薄纱+星速+波纹+混响+Drone）/ 环保休眠（Drone 淡出挂起 + tsparticles 暂停 + 1.3s 回归薄纱） |
@@ -554,4 +558,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.4 · 更新于 2026-10-03，基于 commit e746577 的代码现状（生物钟 SSG/水合一致性修复）。*
+*文档版本 v1.5 · 更新于 2026-10-03，基于 commit 960ab17 的代码现状（生物钟单测 / SSG 水合一致性）。*
