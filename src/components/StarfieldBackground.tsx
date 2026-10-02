@@ -5,20 +5,34 @@
  *
  * 第一层：深空蓝 → 纯黑径向渐变；左上紫色 / 右下深蓝两团星云，
  *        blur(120px)、基准透明度 0.15，以 10s 周期反相交替呼吸。
- * 第二层：@tsparticles/slim 渲染 180 颗散落星辰，0.5–2px 大小分层、
- *        白/浅蓝/暗金三色、0.1–0.3 极慢向上失重漂浮、twinkle 在 0.1↔0.8 间呼吸。
- *        不开启任何连线。
+ *        生物钟薄纱（veil）叠在其上：深夜压成近纯黑、白天微透深海蓝。
+ * 第二层：@tsparticles/slim 渲染 150 颗散落星辰，漂浮速度随时段变化
+ *        （深夜最慢），twinkle 在 0.1↔0.8 间呼吸。不开启任何连线。
  *
  * 纯展示层：pointer-events-none，不拦截恒星悬停 / 输入框 / confetti。
+ * 环保休眠：paused=true 时暂停 tsparticles 容器渲染（CPU/GPU 降载）。
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
 import { Particles, ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
-import type { Engine, ISourceOptions } from "@tsparticles/engine";
+import type { Container, Engine, ISourceOptions } from "@tsparticles/engine";
+import {
+  CIRCADIAN_TOKENS,
+  type CircadianPhase,
+} from "@/lib/circadian";
 
-export default function StarfieldBackground() {
+export default function StarfieldBackground({
+  phase = "evening",
+  paused = false,
+}: {
+  phase?: CircadianPhase;
+  paused?: boolean;
+}) {
+  const containerRef = useRef<Container | null>(null);
+  const tok = CIRCADIAN_TOKENS[phase];
+
   const options = useMemo<ISourceOptions>(
     () => ({
       fullScreen: false,
@@ -43,7 +57,7 @@ export default function StarfieldBackground() {
         },
         move: {
           enable: true,
-          speed: { min: 0.1, max: 0.3 }, // 极慢，个体有速度差 → 纵深感
+          speed: tok.starSpeed, // 生物钟：深夜最慢，白天稍快
           direction: "top", // 统一缓慢向上（视觉上的失重下沉）
           random: true, // 方向带随机抖动，不机械
           straight: false,
@@ -52,8 +66,16 @@ export default function StarfieldBackground() {
       },
       detectOn: "window",
     }),
-    []
+    [tok.starSpeed]
   );
+
+  /* 环保休眠：暂停 / 恢复粒子容器（选项变化导致的引擎重建后重新抓一次状态） */
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!c) return;
+    if (paused) c.pause();
+    else c.play();
+  }, [paused, options]);
 
   return (
     <div
@@ -92,13 +114,31 @@ export default function StarfieldBackground() {
         transition={{ duration: 10, ease: "easeInOut", repeat: Infinity }}
       />
 
+      {/* 生物钟薄纱：背景渐变不可平滑插值，用纯色层 opacity 3s 过渡来"换天" */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: tok.veil.color,
+          opacity: tok.veil.opacity,
+          transition: "opacity 3s ease-in-out",
+        }}
+      />
+
       {/* 第二层 · 微光星空 */}
       <ParticlesProvider
         init={async (engine: Engine) => {
           await loadSlim(engine);
         }}
       >
-        <Particles id="zero-starfield" className="absolute inset-0" options={options} />
+        <Particles
+          id="zero-starfield"
+          className="absolute inset-0"
+          options={options}
+          particlesLoaded={async (container?: Container) => {
+            containerRef.current = container ?? null;
+            if (paused) container?.pause();
+          }}
+        />
       </ParticlesProvider>
     </div>
   );

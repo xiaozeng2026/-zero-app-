@@ -10,10 +10,16 @@
  * 约束：
  * - 首次用户手势后 ensureAudio() 幂等初始化（浏览器自动播放策略）
  * - 所有触发走 claimTime() 的严格递增时间戳，防 "strictly greater" 断言报错
- * - 标签页隐藏时 suspendAudio() 挂起省电；恢复时 resumeAudio() 只解我们自己挂起的
+ * - 生物钟 applyCircadianPhase()：深夜混响最大/Drone 最远，白天稍干稍清晰
+ * - 环保休眠 sleepAudio()：Drone 0.5s 淡出后挂起 AudioContext；
+ *   wakeAudio()：恢复上下文并把 Drone 在 1.6s 内平滑淡入，杜绝突然吵闹
  */
 
 import * as Tone from "tone";
+import {
+  CIRCADIAN_TOKENS,
+  type CircadianPhase,
+} from "@/lib/circadian";
 
 /** 五声音阶（水滴/拨弦走高把位，悬停/风铃走中把位） */
 const PENTA_HIGH = ["C5", "D5", "E5", "G5", "A5"] as const;
@@ -33,11 +39,58 @@ let readyPromise: Promise<void> | null = null;
 let nextNoteTime = 0;
 /** 悬停颂钵节流（秒） */
 let lastBellAt = 0;
+
+/* ---- 生物钟 / 环保休眠所需的节点句柄 ---- */
+let reverbNode: Tone.Reverb | null = null;
+let droneGainNode: Tone.Gain | null = null;
+let droneLfo: Tone.LFO | null = null;
+let currentPhase: CircadianPhase = (() => {
+  // 模块在客户端被 import 时取初始时段（SSR 下不执行音频初始化，无影响）
+  try {
+    const h = new Date().getHours();
+    if (h <= 5) return "night";
+    if (h <= 18) return "day";
+    return "evening";
+  } catch {
+    return "evening";
+  }
+})();
 /** 是否由我们挂起的音频（仅这时才负责恢复） */
 let suspendedByUs = false;
+let sleepTimer: ReturnType<typeof setTimeout> | null = null;
 
 const pick = <T,>(arr: readonly T[]): T =>
   arr[Math.floor(Math.random() * arr.length)];
+
+const rawCtx = (): AudioContext | null => {
+  try {
+    return Tone.getContext().rawContext as AudioContext;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * 应用生物钟参数（可在引擎初始化前调用：缓存 phase，初始化末尾自动生效）
+ * @param ramp 秒，参数平滑过渡时间；初始化瞬间传 0
+ */
+export function applyCircadianPhase(
+  phase: CircadianPhase,
+  ramp = 4
+): void {
+  currentPhase = phase;
+  if (!engine || !reverbNode || !droneGainNode || !droneLfo) return;
+
+  const tok = CIRCADIAN_TOKENS[phase].audio;
+  // 休眠挂起期间 Tone 传输时间不前进，等唤醒时会再应用一次目标音量
+  reverbNode.wet.rampTo(tok.reverbWet, ramp);
+  if (!suspendedByUs) {
+    droneGainNode.gain.rampTo(tok.droneGain, ramp);
+  }
+  // LFO 的 min/max 为数值 setter，直接切换低通起伏区间
+  droneLfo.min = tok.droneLfo.min;
+  droneLfo.max = tok.droneLfo.max;
+}
 
 /** 首次手势后初始化音频图（幂等；并发调用共享同一 Promise） */
 export function ensureAudio(): Promise<void> {
@@ -45,10 +98,12 @@ export function ensureAudio(): Promise<void> {
 
   readyPromise = (async () => {
     await Tone.start();
+    const tok = CIRCADIAN_TOKENS[currentPhase].audio;
 
-    const reverb = new Tone.Reverb({ decay: 13, wet: 0.72 });
+    const reverb = new Tone.Reverb({ decay: 13, wet: tok.reverbWet });
     await reverb.generate();
     reverb.toDestination();
+    reverbNode = reverb;
 
     // 同辈之网专用：22 秒海量混响，像从宇宙边缘折返的回响
     const massive = new Tone.Reverb({ decay: 22, wet: 0.92 });
@@ -58,7 +113,8 @@ export function ensureAudio(): Promise<void> {
 
     // 极低音量低频 Drone：两支微失谐正弦 + 低通，模拟太空嗡鸣
     const droneGain = new Tone.Gain(0).toDestination();
-    droneGain.gain.rampTo(0.045, 6); // 6 秒缓慢浮现
+    droneGain.gain.rampTo(tok.droneGain, 6); // 6 秒缓慢浮现
+    droneGainNode = droneGain;
     const droneFilter = new Tone.Filter(150, "lowpass");
     droneFilter.connect(droneGain);
     [55, 55.4, 110.2].forEach((freq, i) => {
@@ -67,10 +123,15 @@ export function ensureAudio(): Promise<void> {
       osc.connect(oscGain);
       oscGain.connect(droneFilter);
     });
-    // 截止频率缓慢起伏，让 Drone 有"呼吸"
-    new Tone.LFO({ frequency: 0.08, min: 90, max: 220 })
+    // 截止频率缓慢起伏，让 Drone 有"呼吸"（区间随时段变化）
+    const lfo = new Tone.LFO({
+      frequency: 0.08,
+      min: tok.droneLfo.min,
+      max: tok.droneLfo.max,
+    })
       .start()
       .connect(droneFilter.frequency);
+    droneLfo = lfo;
 
     // 水滴 / 木琴：三角波 + 短包络，经混响
     const drop = new Tone.Synth({
@@ -156,27 +217,55 @@ export function playPeerBell(): void {
   engine?.peerBell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime());
 }
 
-/** 标签页隐藏时挂起音频上下文省电（标题变化由页面负责，不依赖本函数） */
-export function suspendAudio(): void {
-  if (!engine) return;
-  try {
-    const ctx = Tone.getContext().rawContext as AudioContext;
-    if (ctx.state === "running") {
-      suspendedByUs = true;
-      ctx.suspend().catch(() => {});
-    }
-  } catch {
-    /* 音频上下文不可用时忽略 */
-  }
+/**
+ * 环保休眠：标签页隐藏时调用。
+ * Drone 0.5s 淡出 → 挂起整个 AudioContext（混响长尾一并冻结，释放硬件资源）。
+ * 标题变化等 UI 处理由页面负责，不依赖引擎是否已初始化。
+ */
+export function sleepAudio(): void {
+  const ctx = rawCtx();
+  if (!engine || !droneGainNode || !ctx || ctx.state !== "running") return;
+  suspendedByUs = true;
+  const now = Tone.now();
+  droneGainNode.gain.cancelScheduledValues(now);
+  droneGainNode.gain.setValueAtTime(Math.max(droneGainNode.gain.value, 0.0001), now);
+  droneGainNode.gain.linearRampToValueAtTime(0.0001, now + 0.5);
+  if (sleepTimer) clearTimeout(sleepTimer);
+  sleepTimer = setTimeout(() => {
+    sleepTimer = null;
+    const c = rawCtx();
+    if (c && c.state === "running") c.suspend().catch(() => {});
+  }, 600);
 }
 
-/** 回到标签页时恢复音频（仅当是我们挂起的） */
-export function resumeAudio(): void {
+/**
+ * 环保唤醒：切回标签页时调用。
+ * 恢复 AudioContext，Drone 从寂静在 1.6s 内线性浮回当前时段的目标音量。
+ * 若用户在 0.6s 挂起窗口内就切回，则取消挂起、只做音量回弹。
+ */
+export function wakeAudio(): void {
   if (!suspendedByUs) return;
   suspendedByUs = false;
-  try {
-    (Tone.getContext().rawContext as AudioContext).resume().catch(() => {});
-  } catch {
-    /* 忽略 */
+  if (sleepTimer) {
+    clearTimeout(sleepTimer);
+    sleepTimer = null;
+  }
+  const ctx = rawCtx();
+  if (!engine || !droneGainNode || !ctx) return;
+
+  const target = CIRCADIAN_TOKENS[currentPhase].audio.droneGain;
+  const fadeIn = () => {
+    if (!droneGainNode) return;
+    const t = Tone.now();
+    droneGainNode.gain.cancelScheduledValues(t);
+    droneGainNode.gain.setValueAtTime(0.0001, t);
+    droneGainNode.gain.linearRampToValueAtTime(target, t + 1.6);
+  };
+
+  if (ctx.state === "suspended") {
+    ctx.resume().then(fadeIn).catch(() => {});
+  } else {
+    // 上下文从未真正挂住（快速切回）：直接平滑回弹
+    fadeIn();
   }
 }

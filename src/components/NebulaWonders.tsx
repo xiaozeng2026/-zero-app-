@@ -133,11 +133,14 @@ function getReducedMotion(): boolean {
 /**
  * @param tempRef 与主页面共享的星云温度引用（0=冰冷，1=灼热）
  *                组件只读，不写入、不改变其冷却循环
+ * @param dim     整体压暗系数（生物钟：深夜 0.82 让纯黑主导），默认 1
  */
 export default function NebulaWonders({
   tempRef,
+  dim = 1,
 }: {
   tempRef: { readonly current: number };
+  dim?: number;
 }) {
   const hotLayersRef = useRef<(HTMLDivElement | null)[]>([]);
   const coldLayersRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -281,7 +284,13 @@ export default function NebulaWonders({
     <div
       aria-hidden
       className="pointer-events-none fixed inset-0 overflow-hidden"
-      style={{ zIndex: -8, mixBlendMode: "screen" }}
+      style={{
+        zIndex: -8,
+        mixBlendMode: "screen",
+        // 生物钟整体压暗：opacity 3s 过渡，深夜缓缓沉入纯黑
+        opacity: dim,
+        transition: "opacity 3s ease-in-out",
+      }}
     >
       {CLOUDS.map((c, i) => (
         // 最外层：悬停视差平移（ref 直写 transform，rAF 惯性插值）

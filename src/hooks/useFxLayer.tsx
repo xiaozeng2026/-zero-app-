@@ -23,6 +23,8 @@ import {
 import { motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import { playBell, playPeerBell } from "@/lib/audioEngine";
+import { CIRCADIAN_TOKENS, type CircadianPhase } from "@/lib/circadian";
+import { hapticTick } from "@/lib/haptics";
 
 /* ------------------------------------------------------------------ */
 /* 类型与常量                                                          */
@@ -101,9 +103,15 @@ const NEBULA_COOL_HALFLIFE = 28;
 /* Hook                                                                */
 /* ------------------------------------------------------------------ */
 
-export function useFxLayer(inputRef: RefObject<HTMLInputElement | null>) {
+export function useFxLayer(
+  inputRef: RefObject<HTMLInputElement | null>,
+  phase: CircadianPhase = "evening"
+) {
   const [ripples, setRipples] = useState<RippleFx[]>([]);
   const [dissolve, setDissolve] = useState<DissolveText | null>(null);
+
+  /** 波纹时长随时段变化（白天轻快 0.92×，深夜沉缓 1.08×） */
+  const ripplePace = CIRCADIAN_TOKENS[phase].ripplePace;
 
   const rippleSeq = useRef(0);
   const dissolveSeq = useRef(0);
@@ -135,11 +143,13 @@ export function useFxLayer(inputRef: RefObject<HTMLInputElement | null>) {
     setRipples((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
-  /* ---- 点击星空：紫 / 青能量涟漪 + 颂钵音（输入框/恒星/字条豁免） ---- */
+  /* ---- 点击星空：紫 / 青能量涟漪 + 颂钵音 + 极轻触觉（输入框/恒星/字条豁免） ---- */
+  /* 注意：近场共鸣/同辈之网走 rippleApiRef.addRipple，不经此监听，不会误震 */
   useEffect(() => {
     const onPointerUp = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest?.("input, button, a, p")) return;
+      hapticTick();
       addRipple(
         {
           x: e.clientX,
@@ -409,6 +419,7 @@ export function useFxLayer(inputRef: RefObject<HTMLInputElement | null>) {
     ripples,
     addRipple,
     removeRipple,
+    ripplePace,
     dissolve,
     startDissolve,
     clearDissolve,
@@ -426,15 +437,18 @@ export function useFxLayer(inputRef: RefObject<HTMLInputElement | null>) {
 
 export function RippleWave({
   ripple,
+  pace = 1,
   onDone,
 }: {
   ripple: RippleFx;
+  /** 生物钟节奏倍率：>1 沉缓，<1 轻快 */
+  pace?: number;
   onDone: () => void;
 }) {
   const tone = RIPPLE_TONES[ripple.tone];
   const size = ripple.size ?? (ripple.supernova ? 170 : 130);
   const endScale = ripple.scaleTo ?? (ripple.supernova ? 6 : 4);
-  const dur = ripple.duration ?? (ripple.supernova ? 3.2 : 2.5);
+  const dur = (ripple.duration ?? (ripple.supernova ? 3.2 : 2.5)) * pace;
   const peak =
     ripple.peak ?? (ripple.supernova ? 0.85 : ripple.dim ? 0.38 : 0.6);
   // 辉光随扩散尺度增强（深紫巨波最盛，同辈涟漪最弱）

@@ -18,14 +18,19 @@ import { AnimatePresence, motion } from "framer-motion";
 import StarfieldBackground from "@/components/StarfieldBackground";
 import NebulaWonders from "@/components/NebulaWonders";
 import {
+  applyCircadianPhase,
   ensureAudio,
   playBassG1,
   playBellThrottled,
   playDrop,
   playPluck,
-  resumeAudio,
-  suspendAudio,
+  sleepAudio,
+  wakeAudio,
 } from "@/lib/audioEngine";
+import { CIRCADIAN_TOKENS } from "@/lib/circadian";
+import { hapticShatter } from "@/lib/haptics";
+import { useCircadianPhase } from "@/hooks/useCircadianPhase";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useStarStorage } from "@/hooks/useStarStorage";
 import { RippleWave, useFxLayer, type DissolveText } from "@/hooks/useFxLayer";
 
@@ -65,12 +70,25 @@ export default function Home() {
   /** 部分安卓 IME 在 compositionend 之后才发提交回车的 keydown，靠时间窗拦截 */
   const compositionEndedAt = useRef(0);
 
+  /* ---- 生物钟时段（深夜/白天/傍晚，到边界自动切换） ---- */
+  const phase = useCircadianPhase();
+  /* ---- 页面可见性（环保休眠信号源） ---- */
+  const hidden = usePageVisibility();
+  /** 回归薄纱纪元：每次从隐藏→可见 +1（渲染期检测外部 store 翻转，首挂天然不触发） */
+  const [veilEpoch, setVeilEpoch] = useState(0);
+  const [prevHidden, setPrevHidden] = useState(hidden);
+  if (prevHidden !== hidden) {
+    setPrevHidden(hidden);
+    if (!hidden) setVeilEpoch((n) => n + 1);
+  }
+
   /* ---- 三大模块：星穹存储 / 特效层（音频引擎为 lib 单例，直接按需调用） ---- */
   const { stars, hydrated, addStar } = useStarStorage();
   const {
     ripples,
     addRipple,
     removeRipple,
+    ripplePace,
     dissolve,
     startDissolve,
     clearDissolve,
@@ -79,7 +97,12 @@ export default function Home() {
     nebulaTempRef,
     heatNebula,
     burstStardust,
-  } = useFxLayer(inputRef);
+  } = useFxLayer(inputRef, phase);
+
+  /* ---- 生物钟 → 音频引擎参数（混响湿度 / Drone 音量与低通区间） ---- */
+  useEffect(() => {
+    applyCircadianPhase(phase);
+  }, [phase]);
 
   /* ---- 首次点击 / 按键即解锁音频 ---- */
   useEffect(() => {
@@ -96,25 +119,17 @@ export default function Home() {
     };
   }, []);
 
-  /* ---- 标签页隐藏：挂起音频省电，标题静默为「…」；回来恢复 ---- */
+  /* ---- 环保休眠：切走 → 标题静默「…」+ 音频淡出挂起（粒子暂停由 StarfieldBackground 的 paused 负责）；
+              切回 → 标题恢复 + 音频 1.6s 淡入（回归薄纱纪元在渲染期推进，驱动 1.3s 黑纱淡出） ---- */
   useEffect(() => {
-    const TITLE = "归零 Zero";
-    const onVis = () => {
-      // 标题/状态先行，绝不依赖音频引擎是否已初始化
-      if (document.hidden) {
-        document.title = "…";
-        suspendAudio();
-      } else {
-        document.title = TITLE;
-        resumeAudio();
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      document.title = TITLE;
-    };
-  }, []);
+    if (hidden) {
+      document.title = "…";
+      sleepAudio();
+    } else {
+      document.title = "归零 Zero";
+      wakeAudio();
+    }
+  }, [hidden]);
 
   useEffect(
     () => () => {
@@ -182,6 +197,8 @@ export default function Home() {
 
     setValue("");
 
+    // 触觉：轻情绪一短震，重情绪「震-停-震」模拟重物落地回弹
+    hapticShatter(heavy);
     // 能量传递给星云：沉重更烫
     heatNebula(heavy);
 
@@ -222,7 +239,7 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-black font-sans">
-      <StarfieldBackground />
+      <StarfieldBackground phase={phase} paused={hidden} />
 
       {/* 星云热力层：吸收文字粉碎能量后的暗红/琥珀暖光，rAF 直写 opacity/scale */}
       <div
@@ -237,7 +254,7 @@ export default function Home() {
       />
 
       {/* 星云奇观：宏大冷色星云，随星云温度交叉淡入暖金/余烬燃烧态（纯视觉层 z-8） */}
-      <NebulaWonders tempRef={nebulaTempRef} />
+      <NebulaWonders tempRef={nebulaTempRef} dim={CIRCADIAN_TOKENS[phase].nebulaDim} />
 
       {/* 流星拖尾：在星空之上，不拦截任何点击 */}
       <canvas ref={fxCanvasRef} aria-hidden className="pointer-events-none fixed inset-0 z-[5]" />
@@ -245,7 +262,7 @@ export default function Home() {
       {/* 时空涟漪：能量波纹，在星空之上、星穹与输入框之下 */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-[6]">
         {ripples.map((r) => (
-          <RippleWave key={r.id} ripple={r} onDone={() => removeRipple(r.id)} />
+          <RippleWave key={r.id} ripple={r} pace={ripplePace} onDone={() => removeRipple(r.id)} />
         ))}
       </div>
 
@@ -415,6 +432,18 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* 回归薄纱：从后台切回时一层黑纱 1.3s 缓缓退去，画面不刺眼（与音频 1.6s 淡入同步） */}
+      {veilEpoch > 0 && (
+        <motion.div
+          key={veilEpoch}
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-[70] bg-black"
+          initial={{ opacity: 0.55 }}
+          animate={{ opacity: 0 }}
+          transition={{ duration: 1.3, ease: "easeOut" }}
+        />
+      )}
     </main>
   );
 }
