@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    ".sim-root/**", // 本地模拟 GitHub Pages basePath 的静态根
     "next-env.d.ts",
   ]),
 ]);
