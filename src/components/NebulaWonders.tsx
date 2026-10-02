@@ -19,7 +19,7 @@
  * - 全程不触发 React 重渲染；blur 滤镜静态，只有 opacity/transform 变化
  */
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 
 interface CloudDef {
@@ -119,6 +119,17 @@ function cloudCenters(vw: number, vh: number) {
   });
 }
 
+/** prefers-reduced-motion 外部存储：供 useSyncExternalStore 订阅 */
+function subscribeReducedMotion(onChange: () => void) {
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function getReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /**
  * @param tempRef 与主页面共享的星云温度引用（0=冰冷，1=灼热）
  *                组件只读，不写入、不改变其冷却循环
@@ -133,13 +144,9 @@ export default function NebulaWonders({
   const parallaxRef = useRef<(HTMLDivElement | null)[]>([]);
   const wakeRefs = useRef<(HTMLDivElement | null)[]>([]);
   const cursorGlowRef = useRef<HTMLDivElement | null>(null);
-  // 仅客户端判定减弱动效（避免 SSR 预渲染期访问 window）
-  const [reduced, setReduced] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(mq.matches);
-  }, []);
+  // 仅客户端判定减弱动效（避免 SSR 预渲染期访问 window）；
+  // 订阅系统偏好变化，切换「减弱动效」时即时生效
+  const reduced = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, () => false);
 
   /* 鼠标悬停交互：靠近的星云被轻轻吸引（视差）、微微增亮、
      轻微「吸气」放大；指尖同时在雾中投下一团跟随的唤醒光斑。
