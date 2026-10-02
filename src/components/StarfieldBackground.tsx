@@ -23,6 +23,14 @@ import {
   type CircadianPhase,
 } from "@/lib/circadian";
 
+/**
+ * ParticlesProvider 要求 init 回调在整个应用生命周期内引用稳定，
+ * 必须放在模块级（组件重渲染/时段切换时都不能变，否则引擎直接抛错）。
+ */
+const initSlim = async (engine: Engine): Promise<void> => {
+  await loadSlim(engine);
+};
+
 export default function StarfieldBackground({
   phase = "evening",
   paused = false,
@@ -125,11 +133,7 @@ export default function StarfieldBackground({
       />
 
       {/* 第二层 · 微光星空 */}
-      <ParticlesProvider
-        init={async (engine: Engine) => {
-          await loadSlim(engine);
-        }}
-      >
+      <ParticlesProvider init={initSlim}>
         <Particles
           id="zero-starfield"
           className="absolute inset-0"
