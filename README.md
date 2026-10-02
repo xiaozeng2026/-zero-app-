@@ -4,7 +4,7 @@
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
 > 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA」
-> 文档更新日期：2026-10-02（基于 commit 850c7af）
+> 文档更新日期：2026-10-02（基于 commit 28c90f2）
 
 ---
 
@@ -60,26 +60,24 @@ zero-app/
     │   ├── layout.tsx             # 根布局：元信息/manifest/图标/appleWebApp/themeColor
     │   ├── manifest.ts            # ★ PWA 清单（force-static，BASE_PATH 前缀）
     │   ├── globals.css            # Tailwind 主题令牌 + 星云漂移/流光关键帧
-    │   └── page.tsx               # ★ 首页与全部核心逻辑（唯一活跃入口）
+    │   └── page.tsx               # ★ 页面编排：状态接线 + 提交流程 + JSX（约 380 行）
     ├── components/
     │   ├── StarfieldBackground.tsx # ★ 星空底座（渐变 + tsparticles）
     │   ├── NebulaWonders.tsx       # ★ 星云奇观层（宏大星云 + 悬停/触屏交互 + 温度联动）
-    │   ├── ServiceWorkerRegister.tsx # ★ load 后注册 sw.js（静默失败）
-    │   ├── ZeroSpace.tsx           # ┐
-    │   ├── EmotionCanvas.tsx       # ├ 旧版组件群：当前版本未引用（死代码）
-    │   ├── DissolvingInput.tsx     # │ 改动时勿误伤，也不要在本次任务中顺手删除
-    │   └── WhisperPhrase.tsx       # ┘
+    │   └── ServiceWorkerRegister.tsx # ★ load 后注册 sw.js（静默失败）
+    ├── hooks/
+    │   ├── useStarStorage.ts      # ★ 星穹存储：localStorage 恒星日记（增查限流）
+    │   └── useFxLayer.tsx         # ★ 特效层：涟漪/溶解/流星/热力/星尘/调度器 + RippleWave
     └── lib/
-        ├── generativeAudio.ts      # ┐ 旧版音频/星穹/语料模块：仅被旧组件引用
-        ├── stars.ts                # ├ 当前 page.tsx 已内联等价逻辑，不依赖它们
-        └── whispers.ts             # ┘
+        └── audioEngine.ts         # ★ 音频引擎：Tone.js 单例（Drone/水滴/拨弦/Bass/双混响）
 ```
 
-核心代码集中在三个文件：
+代码分四块：
 
-- `src/app/page.tsx`（约 1000 行）：状态、音频引擎、三层定时器、Canvas 流星、自适应爆发、输入框、可见性挂起。
-- `src/components/NebulaWonders.tsx`：星云奇观层（3 团宏大星云、冷暖双层温度联动、悬停/触屏交互）。
-- `src/components/StarfieldBackground.tsx`：纯展示星空底座。
+- `src/app/page.tsx`（约 380 行）：页面编排——状态接线、提交流程（自适应判断/IME 组词守卫）、字条、全部 JSX。
+- `src/lib/audioEngine.ts`（约 160 行）：音频引擎模块级单例——初始化、`claimTime()`、六种音色触发、标签页挂起/恢复。
+- `src/hooks/useStarStorage.ts`（约 90 行）：星穹存储 hook——localStorage 恒星日记的读取/落星/限流。
+- `src/hooks/useFxLayer.tsx`（约 440 行）：特效层 hook——涟漪状态、文字溶解、流星 Canvas rAF、星云温度冷却、近场共鸣与同辈之网调度器、星尘爆裂、RippleWave 渲染组件。
 
 ---
 
@@ -287,6 +285,8 @@ if (T < 0.002) T = 0;                          // 死区，彻底归零
 
 > 另有「近场共鸣」调度器（5–12s，开启减弱动效时 11–19s）：65% 生成 Canvas 流星（25% 金色）、35% 生成普通暗涟漪，播放常规 bell。两套循环寓意不同，勿合并。
 
+> **隐私说明**：同辈之网为本地模拟——涟漪坐标与触发时机全部在浏览器内随机生成，无任何网络请求、无任何数据上传；本应用不采集任何数据。
+
 ### 5.7 生成式音频（Tone.js 音频图）
 
 ```mermaid
@@ -316,7 +316,9 @@ const t = Math.max(Tone.now(), nextNoteTimeRef.current + 0.001);
 
 - Drone：3 支振荡器（第三支 110.2Hz 增益 0.25）→ 低通 150Hz → 0.08Hz LFO 让截止频率 90–220Hz 呼吸；初始化后 6s 淡入到 0.045。
 
-### 5.8 星穹与本地持久化
+> 实现位于 `src/lib/audioEngine.ts`（模块级单例）：`ensureAudio()` 幂等初始化，音色以 `playDrop / playPluck / playBassG1 / playBell / playBellThrottled / playPeerBell` 语义化导出，标签页挂起/恢复为 `suspendAudio() / resumeAudio()`。
+
+### 5.8 星穹与本地持久化（useStarStorage）
 
 - Key：`zero:stars:warm:v1`；仅客户端 `useEffect` 内读取，规避 SSR hydration mismatch。
 - 结构：
@@ -333,7 +335,7 @@ interface Star {
 ```
 
 - 每次回车落一颗（位置/大小/色/周期随机），写入前 `slice(-120)` 限流；`setItem` 包 try/catch，存储不可用也不影响体验。
-- 悬停/触摸恒星：放大发亮 + `touchStar()`（0.12s 节流）随机五声音阶。
+- 悬停/触摸恒星：放大发亮 + `playBellThrottled()`（0.12s 节流）随机五声音阶。
 
 ### 5.9 光影字条
 
@@ -347,6 +349,12 @@ interface Star {
 - 聚焦：文字暖金辉光（text-shadow 14→26px）、横线延展至 288px（w-72）并透琥珀辉光、星点放大点亮、暖光晕全亮、`.zero-line-shimmer` 流光 3.6s 沿海平线游移。
 - 有字未聚焦：横线保持延展微亮（由 `value.trim()` 切换类）。
 - 流光关键帧定义在 `globals.css`，`prefers-reduced-motion: reduce` 时关闭。
+
+**IME 组词守卫**（修复中文输入法误判）：
+
+- 组词（拼音未上屏）期间的回车 = 确认拼音/选字，不是提交意图。onKeyDown 中依次检查 `e.nativeEvent.isComposing`、`keyCode === 229`（主流浏览器）、`composingRef`（onCompositionStart/End 维护）、以及「compositionend 后 100ms 内」时间窗（部分安卓 IME 的提交回车晚于 compositionend 触发），命中任一即不提交。
+- 组词中不逐键响水滴（拼音字母每键 onChange 都会触发，逐键发声会把 "wanshang" 变成 8 声水滴）；仅整词上屏（compositionend）后响一声。
+- 受控 input 在组词期间仍正常 `setValue`（React 受控输入必须同步组词文本，否则 IME 卡死）。
 
 ### 5.11 PWA：装到主屏与离线
 
@@ -384,16 +392,16 @@ interface Star {
 
 | Effect / 定时器 | 职责 | 清理 |
 |---|---|---|
-| 启动 effect | 读取 localStorage 星穹 | 无需清理 |
-| 音频解锁 effect | 首次手势 `ensureAudio()` | removeEventListener |
-| 可见性 effect | 标题静默 + suspend/resume 音频 | removeEventListener + 标题还原 |
-| 点击涟漪 effect | window pointerup | removeEventListener |
-| Canvas effect | resize、rAF 流星+温度冷却、近场共鸣 setTimeout | cancelAnimationFrame + clearTimeout + removeEventListener |
-| 同辈之网 effect | 15–45s setTimeout 链 | clearTimeout |
+| 启动 effect（useStarStorage） | 读取 localStorage 星穹 | 无需清理 |
+| 音频解锁 effect（page.tsx） | 首次手势 `ensureAudio()` | removeEventListener |
+| 可见性 effect（page.tsx） | 标题静默 + suspend/resume 音频 | removeEventListener + 标题还原 |
+| 点击涟漪 effect（useFxLayer） | window pointerup | removeEventListener |
+| Canvas effect（useFxLayer） | resize、rAF 流星+温度冷却、近场共鸣 setTimeout | cancelAnimationFrame + clearTimeout + removeEventListener |
+| 同辈之网 effect（useFxLayer） | 15–45s setTimeout 链 | clearTimeout |
 | NebulaWonders 温度 effect | 250ms 采样 tempRef 直写暖层 opacity | clearInterval |
 | NebulaWonders 悬停/触屏 effect | pointer 系列监听 + rAF 惯性插值（reduced 时不挂载） | cancelAnimationFrame + removeEventListener ×7 |
 | ServiceWorkerRegister effect | load 后注册 sw.js | removeEventListener |
-| whisperTimer | 字条延迟 | 卸载时 clearTimeout |
+| whisperTimer（page.tsx） | 字条延迟 | 卸载时 clearTimeout |
 
 长生命周期调度器通过 `rippleApiRef`（每次 render 同步为最新 `addRipple`）向状态层写入，避免闭包捕获旧 state。
 
@@ -423,7 +431,8 @@ npm run lint       # ESLint
 7. 触屏（手机/模拟器）：手指按住星空拖动，光斑跟手、附近星云发亮；抬起熄灭。按在输入框上不触发。
 8. 切到其他标签页：标题变「…」，音频静默；切回恢复标题与音频。
 9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v1` activated；Network 勾选 Offline 刷新仍可打开。
-10. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
+10. 中文输入法组词中按回车：仅确认拼音/选字，不提交情绪；整词上屏后只响一声水滴。
+11. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
 
 > 自动化浏览器在隐藏标签页会冻结 rAF，测流星/冷却时确认 `document.visibilityState === "visible"`；浏览器脚本内 `await sleep` 累计超过约 15s 可能导致 evaluate 返回 undefined，拆成 6–8s 短脚本执行。
 
@@ -474,7 +483,8 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 - **触屏合成事件防御**：`e.target` 可能是 window，调 `closest()` 前先 `typeof el.closest === "function"`。
 - **Service Worker scope**：部署在子路径时不要写死 `/sw.js`，用 `new URL("./sw.js", location.href)` 让 scope 天然限定在子路径。
 - **国内可达性**：优先 GitHub Pages 而非 Vercel 域名（后者在部分国内移动网络/微信内置浏览器中不可达）。
-- **旧组件勿误删**：`components/ZeroSpace|EmotionCanvas|DissolvingInput|WhisperPhrase` 与 `lib/*` 为历史版本，当前首页不引用；保留可追溯，清理应作为独立任务并先全量回归。
+- **隐私**：全应用无后端、无统计、无网络请求（除 GitHub Pages 静态资源本身）；星穹日记只存本机 localStorage，同辈之网为本地模拟。
+- **IME**：受控 input 必须在组词期间正常 `setValue`，回车提交须过 composition 守卫（见 5.10）。
 - **可访问性**：`prefers-reduced-motion` 下自动事件降频、星云漂移/悬停交互/流光关闭；confetti `disableForReducedMotion`；viewport 禁止缩放是刻意的沉浸式取舍。
 
 ---
@@ -483,6 +493,8 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-02 | `28c90f2` | 重构：删除 7 个旧组件死代码（净 -1355 行）/ page.tsx 拆为音频引擎+星穹存储+特效层三模块 / 修复 IME 组词回车误提交 |
+| 2026-10-02 | `7a2574c` | README v1.1：补充星云奇观层/悬停触屏/PWA/可见性四模块 |
 | 2026-10-02 | `850c7af` | 移动端陪伴：触屏拖动光斑 + PWA（manifest + SW + 深空图标）+ 标签隐藏 suspend 音频 + 标题静默「…」 |
 | 2026-10-01 | `8b4a9af` | 星云悬停增强：指尖唤醒光斑 + 悬停云觉醒吸气放大（1.04x） |
 | 2026-10-01 | `08dc9b1` | 星云悬停交互：鼠标靠近被吸引（视差偏移 + 惯性 LERP 0.045）与局部增亮，离开缓慢回弹 |
@@ -493,4 +505,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.1 · 更新于 2026-10-02，基于 commit 850c7af 的代码现状。*
+*文档版本 v1.2 · 更新于 2026-10-02，基于 commit 28c90f2 的代码现状（模块化重构后）。*
