@@ -431,7 +431,8 @@ interface Star {
 | day 白天 06–18 | 深海蓝 `#0a1c3d` 0.28 微透 | 0.12–0.36 稍快 | 0.92× 轻快 | 1.00 | 0.66 稍干 | 0.052 稍清晰 | 130–280Hz 透 |
 | evening 傍晚 19–23 | 无薄纱（基准态） | 0.10–0.30 | 1.00× | 1.00 | 0.72 | 0.045 | 90–220Hz |
 
-- `useCircadianPhase()`：初始按时长判定，并 setTimeout 到下一边界（00:00/06:00/19:00）后自动切换——页面整夜不关也能在凌晨 6 点自然"天亮"。
+- `useCircadianPhase()`：**初始固定返回基准态 `evening`，挂载后（effect）才读访客本地时间同步真实时段**，并 setTimeout 到下一边界（00:00/06:00/19:00）自动切换——页面整夜不关也能在凌晨 6 点自然"天亮"。
+  - **为什么初值不能直接按时间判定**：SSG 在 GitHub Actions（UTC 时区）构建，`new Date()` 烤进静态 HTML 的是构建机时段；React 水合**不会 patch 与客户端渲染不一致的既有 style 属性**，若首帧按访客时间渲染，薄纱颜色/星云压暗会一直卡在构建时刻（曾致深夜访客看到白天蓝纱）。固定初值保证「SSG HTML === 水合渲染」，挂载后经一次正常 state 更新切入真实时段（3s 过渡平滑换天）。
 - **底色过渡**：CSS 渐变不可平滑插值，因此在固定渐变上盖一层纯色薄纱，用 `opacity 3s transition` 换天，无闪烁。
 - **星速切换**：options 变化触发 tsparticles 容器重建（一天最多 2 次，发生在整点边界）。
 - **音频切换**：`applyCircadianPhase()` 对 `reverb.wet`/`droneGain.gain` 做 4s `rampTo`，LFO `min/max` 数值 setter 即时改区间；引擎未初始化时缓存 phase，`ensureAudio()` 末尾按当前时段构建。
@@ -470,7 +471,7 @@ npm run lint       # ESLint
 8. 切到其他标签页：标题变「…」，音频静默；切回恢复标题与音频。
 9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v1` activated；Network 勾选 Offline 刷新仍可打开。
 10. 中文输入法组词中按回车：仅确认拼音/选字，不提交情绪；整词上屏后只响一声水滴。
-11. 生物钟：按当前本地时间整站氛围不同（深夜更黑更慢混响更大）；可临时改系统时间跨边界验证自动换天。
+11. 生物钟：按当前本地时间整站氛围不同（深夜更黑更慢混响更大）；可临时改系统时间跨边界验证自动换天。**注意 SSG 初帧必须是 evening 基准**：静态 HTML 不含 `#0a1c3d`/`opacity:0.28` 等任何时段色值，水合数秒后才平滑显出深夜黑纱（验 fiber props 与内联 style 一致，勿只看 console）。
 12. 切走标签页：标题变「…」，DevTools 可见 tsparticles 暂停、AudioContext suspended；切回时黑纱缓出、Drone 平滑淡入。
 13. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
 
@@ -526,6 +527,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 - **隐私**：全应用无后端、无统计、无网络请求（除 GitHub Pages 静态资源本身）；星穹日记只存本机 localStorage，同辈之网为本地模拟。
 - **IME**：受控 input 必须在组词期间正常 `setValue`，回车提交须过 composition 守卫（见 5.10）。
 - **生物钟 token 单一事实源**：所有时段参数只准写在 `src/lib/circadian.ts`，组件经 props 消费；新增随时间变化的视觉/音频参数时往 token 表加一列，勿在组件里判小时。
+- **SSG 时段值必须挂载后注入**：任何依赖访客本地时间的值，初值一律固定为基准态（evening）且必须与 SSG 渲染一致；真实值只能在 effect 中 setState 注入。React 水合不 patch 不一致的既有属性（style 尤其明显），构建机（UTC）与访客时区差会让声明式样式永久卡在建站时刻。
 - **渐变不可过渡**：背景换天用纯色薄纱 opacity 过渡，不要指望 `transition: background` 插值渐变。
 - **休眠淡出先于挂起**：先 ramp gain（≥0.5s）再 `ctx.suspend()`，恢复必须 `resume()` 之后再排淡入曲线（挂起期间 Tone 传输时间不前进）。
 - **触觉只跟真人手势**：自动涟漪（近场共鸣/同辈网）严禁调用振动，只有用户 pointerup/提交可震；Vibration API 不可用时静默。
@@ -537,6 +539,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-03 | `e746577` | 修复：生物钟时段 SSG/水合相位漂移（初值固定 evening，挂载后注入本地时段；深夜访客此前看到的是构建机 UTC 白天蓝纱）；.sim-root 加入 eslint ignores |
 | 2026-10-02 | `eda781b` | 修复：ParticlesProvider init 提为模块级常量（接入 props 后重渲染致 init 引用变化、tsparticles 引擎抛错） |
 | 2026-10-02 | `13f855f` | 底层质感三增强：触觉反馈（Vibration）/ 生物钟环境（circadian token：底色薄纱+星速+波纹+混响+Drone）/ 环保休眠（Drone 淡出挂起 + tsparticles 暂停 + 1.3s 回归薄纱） |
 | 2026-10-02 | `28c90f2` | 重构：删除 7 个旧组件死代码（净 -1355 行）/ page.tsx 拆为音频引擎+星穹存储+特效层三模块 / 修复 IME 组词回车误提交 |
@@ -551,4 +554,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.3 · 更新于 2026-10-02，基于 commit eda781b 的代码现状（生物钟 / 触觉 / 环保休眠）。*
+*文档版本 v1.4 · 更新于 2026-10-03，基于 commit e746577 的代码现状（生物钟 SSG/水合一致性修复）。*
