@@ -92,6 +92,37 @@ export function applyCircadianPhase(
   droneLfo.max = tok.droneLfo.max;
 }
 
+/**
+ * 手势同步解锁 —— 必须在用户事件（touchstart/pointerdown/keydown）的
+ * **同步调用栈**里调用，不能放在 await 之后。
+ *
+ * 关键陷阱：Tone.start() 内部是 globalContext.resume()，而真实 AudioContext
+ * 在首次 getContext() 时才惰性创建；此前 globalContext 是 DummyContext，
+ * 其 resume() 只返回 resolve()（什么都没做）。若先 `await Tone.start()` 再
+ * new 节点（我们的旧写法），真实 Context 在微任务中诞生——桌面 Chrome 仍以
+ * running 启动，iOS Safari / 微信 WKWebView 则永久 suspended，表现为全程无声。
+ *
+ * 做法：同步 getContext() 先建出真实 Context，立刻 resume()。
+ */
+export function primeAudio(): void {
+  try {
+    const raw = Tone.getContext().rawContext as AudioContext | null;
+    if (raw && raw.state !== "running") {
+      raw.resume().catch(() => {});
+    }
+    // 微信内置浏览器：借 WeixinJSBridge 解除 WebView 媒体播放限制
+    const w = window as unknown as {
+      WeixinJSBridge?: { invoke?: (api: string, cb: () => void) => void };
+    };
+    w.WeixinJSBridge?.invoke?.("getNetworkType", () => {
+      const c = rawCtx();
+      if (c && c.state !== "running") c.resume().catch(() => {});
+    });
+  } catch {
+    /* 无 WebAudio 环境：静默 */
+  }
+}
+
 /** 首次手势后初始化音频图（幂等；并发调用共享同一 Promise） */
 export function ensureAudio(): Promise<void> {
   if (readyPromise) return readyPromise;
@@ -100,6 +131,8 @@ export function ensureAudio(): Promise<void> {
     /** 本次初始化已创建的节点：失败时逐一 dispose，避免重试后 Drone 叠音 */
     const created: { dispose?: () => void }[] = [];
     try {
+      // 同步语义上的保险：先确保真实 Context 已建（正常路径 primeAudio 已建过）
+      Tone.getContext();
       await Tone.start();
       const tok = CIRCADIAN_TOKENS[currentPhase].audio;
 
@@ -188,6 +221,11 @@ export function ensureAudio(): Promise<void> {
       created.push(peerBell);
 
       engine = { drop, bass, bell, pluck, peerBell };
+
+      // 初始化耗时（reverb 脉冲生成）后再确认一次：iOS 上 Context 可能仍是
+      // suspended/interrupted，补一次 resume；Drone gain ramp 在 running 后才出声
+      const ctx = rawCtx();
+      if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
     } catch (err) {
       // 微信 WKWebView 等环境首次手势可能仍被音频策略拒绝：
       // 释放半成品节点并清空状态，允许下一次手势重新初始化（否则永久静音）
@@ -217,28 +255,53 @@ export function claimTime(): number {
   return t;
 }
 
+/**
+ * 播放统一入口：
+ * - 引擎未就绪（首次手势后音频图还在构建）：先解锁初始化，就绪后补奏，不丢音；
+ * - 引擎在但 Context 被系统挂起（iOS interrupted，非我方休眠）：顺手 resume。
+ */
+function whenReady(play: (e: Engine) => void): void {
+  const c = rawCtx();
+  if (engine) {
+    if (c && c.state !== "running" && !suspendedByUs) c.resume().catch(() => {});
+    play(engine);
+    return;
+  }
+  primeAudio();
+  ensureAudio()
+    .then(() => {
+      if (engine) play(engine);
+    })
+    .catch(() => {});
+}
+
 /** 打字水滴：高把位五声 */
 export function playDrop(): void {
-  engine?.drop.triggerAttackRelease(pick(PENTA_HIGH), "16n", claimTime());
+  whenReady((e) => e.drop.triggerAttackRelease(pick(PENTA_HIGH), "16n", claimTime()));
 }
 
 /** 轻情绪提交：空灵拨弦，高把位五声音阶 */
 export function playPluck(): void {
-  engine?.pluck.triggerAttackRelease(pick(PENTA_HIGH), "8n", claimTime());
+  whenReady((e) => e.pluck.triggerAttackRelease(pick(PENTA_HIGH), "8n", claimTime()));
 }
 
 /** 重情绪提交：G1（49Hz）极低频叹息，经 22s 海量混响沉入深空 */
 export function playBassG1(): void {
-  engine?.bass.triggerAttackRelease("G1", "1n", claimTime());
+  whenReady((e) => e.bass.triggerAttackRelease("G1", "1n", claimTime()));
 }
 
 /** 涟漪伴随 / 近场共鸣颂钵 */
 export function playBell(): void {
-  engine?.bell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime());
+  whenReady((e) => e.bell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime()));
 }
 
 /** 恒星悬停：0.12s 节流，防止快速划过多音堆叠 */
 export function playBellThrottled(): void {
+  if (!engine) {
+    // 首次触摸即落在恒星上：节流依赖 Tone.now，未初始化时直接走兜底播放
+    playBell();
+    return;
+  }
   const now = Tone.now();
   if (now - lastBellAt < 0.12) return;
   lastBellAt = now;
@@ -247,7 +310,7 @@ export function playBellThrottled(): void {
 
 /** 同辈之网风铃：只进 22s 海量混响 */
 export function playPeerBell(): void {
-  engine?.peerBell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime());
+  whenReady((e) => e.peerBell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime()));
 }
 
 /**

@@ -47,6 +47,7 @@ vi.mock("tone", () => {
     start = vi.fn(function (this: MockNode) {
       return this;
     });
+    triggerAttackRelease = vi.fn();
     dispose = vi.fn(() => Promise.resolve());
     generate = vi.fn(async () => {
       if (h.reverbFail) throw new Error("reverb blocked by autoplay policy");
@@ -97,11 +98,27 @@ vi.mock("tone", () => {
 });
 
 // mock 必须在 import 被测模块前就绪 —— vitest 会把 vi.mock 提升到文件顶部
-import { ensureAudio, sleepAudio, wakeAudio } from "./audioEngine";
+import { ensureAudio, primeAudio, sleepAudio, wakeAudio } from "./audioEngine";
 
 const flush = async (ticks = 6) => {
   for (let i = 0; i < ticks; i++) await Promise.resolve();
 };
+
+describe("primeAudio 手势同步解锁", () => {
+  it("Context 挂起时调用 resume，且 resume 被拒不抛错", () => {
+    h.ctxState = "suspended";
+    h.resumeCalls = 0;
+    expect(() => primeAudio()).not.toThrow();
+    expect(h.resumeCalls).toBe(1); // mock 中第 1 次 resume 拒绝，primeAudio 静默吞掉
+  });
+
+  it("Context 已 running 时不重复 resume", () => {
+    h.ctxState = "running";
+    h.resumeCalls = 0;
+    primeAudio();
+    expect(h.resumeCalls).toBe(0);
+  });
+});
 
 describe("audioEngine 初始化失败可重试", () => {
   it("Reverb 生成失败 → reject 且已建节点被 dispose，状态允许重建", async () => {

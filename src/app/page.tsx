@@ -24,6 +24,7 @@ import {
   playBellThrottled,
   playDrop,
   playPluck,
+  primeAudio,
   sleepAudio,
   wakeAudio,
 } from "@/lib/audioEngine";
@@ -107,13 +108,17 @@ export default function Home() {
     applyCircadianPhase(phase);
   }, [phase]);
 
-  /* ---- 首次点击 / 按键即解锁音频 ----
-     微信 WKWebView 等环境首次可能被音频策略拒绝：失败时保留监听，
-     下一次手势继续尝试（ensureAudio 内部会清理半成品并允许重建） */
+  /* ---- 首次触摸 / 按键即解锁音频 ----
+     关键：primeAudio() 必须在事件的同步调用栈里执行（先建出真实
+     AudioContext 再 resume），微信 WKWebView 才放行；放到 await 后会
+     导致 Context 以 suspended 诞生、全程无声。
+     初始化失败时保留监听，下一次手势继续尝试。 */
   useEffect(() => {
     const unlock = () => {
+      primeAudio();
       ensureAudio()
         .then(() => {
+          window.removeEventListener("touchstart", unlock);
           window.removeEventListener("pointerdown", unlock);
           window.removeEventListener("keydown", unlock);
           window.removeEventListener("touchend", unlock);
@@ -122,13 +127,30 @@ export default function Home() {
           /* 保留监听，等待下一次手势 */
         });
     };
+    // touchstart 是微信/iOS 上最早、最可靠的手势事件
+    window.addEventListener("touchstart", unlock, { passive: true });
     window.addEventListener("pointerdown", unlock);
     window.addEventListener("keydown", unlock);
     window.addEventListener("touchend", unlock);
+
+    // 微信桥就绪事件（部分版本先于首个手势即可解除媒体限制）
+    const wx = window as unknown as {
+      WeixinJSBridge?: unknown;
+      addEventListener?(t: string, fn: () => void): void;
+      removeEventListener?(t: string, fn: () => void): void;
+    };
+    const onBridge = () => primeAudio();
+    if (wx.WeixinJSBridge) {
+      onBridge();
+    } else {
+      document.addEventListener("WeixinJSBridgeReady", onBridge);
+    }
     return () => {
+      window.removeEventListener("touchstart", unlock);
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
       window.removeEventListener("touchend", unlock);
+      document.removeEventListener("WeixinJSBridgeReady", onBridge);
     };
   }, []);
 
@@ -240,11 +262,12 @@ export default function Home() {
     }, 1050);
   }, [value, heatNebula, startDissolve]);
 
-  /* ---- 打字反馈：仅"新增字符"且不在 IME 组词中时响水滴 ---- */
+  /* ---- 打字反馈：仅"新增字符"且不在 IME 组词中时响水滴 ----
+     playDrop 内部自带「未解锁则初始化后补奏」兜底，无需手动 ensure */
   const handleChange = (next: string) => {
     setValue(next);
     if (!composingRef.current && next.length > value.length) {
-      ensureAudio().then(playDrop);
+      playDrop();
     }
   };
 
@@ -412,7 +435,7 @@ export default function Home() {
               composingRef.current = false;
               compositionEndedAt.current = performance.now();
               // 整词上屏：只响一声水滴（拼音期间的字符不逐键发声）
-              if (e.currentTarget.value.length > 0) ensureAudio().then(playDrop);
+              if (e.currentTarget.value.length > 0) playDrop();
             }}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
