@@ -30,6 +30,7 @@ import {
   type RippleColors,
 } from "@/lib/emotionWeight";
 import { hapticTick } from "@/lib/haptics";
+import { coolNebula, NEBULA_COOL_HALFLIFE } from "@/lib/nebula";
 
 /* ------------------------------------------------------------------ */
 /* 类型与常量                                                          */
@@ -97,9 +98,6 @@ const RIPPLE_TONES: Record<
     core: "rgba(251,191,36,0.14)",
   },
 };
-
-/** 星云温度冷却半衰期（秒）：约 5 个半衰期 ≈ 2.5 分钟回到冰冷深空 */
-const NEBULA_COOL_HALFLIFE = 28;
 
 /* ------------------------------------------------------------------ */
 /* Hook                                                                */
@@ -245,10 +243,11 @@ export function useFxLayer(
       // 星云热力学：T(t) = T0 * 0.5^(dt/半衰期)，非线性、前段温吞后段悠长
       if (lastTs !== null) {
         const dt = Math.min(0.1, (ts - lastTs) / 1000);
-        if (nebulaTempRef.current > 0) {
-          nebulaTempRef.current *= Math.pow(0.5, dt / NEBULA_COOL_HALFLIFE);
-          if (nebulaTempRef.current < 0.002) nebulaTempRef.current = 0;
-        }
+        nebulaTempRef.current = coolNebula(
+          nebulaTempRef.current,
+          dt,
+          NEBULA_COOL_HALFLIFE
+        );
       }
       lastTs = ts;
 

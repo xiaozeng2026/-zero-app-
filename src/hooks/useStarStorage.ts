@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseStars, STARS_LIMIT } from "@/lib/starCodec";
 
 export interface Star {
   id: string;
@@ -23,7 +24,6 @@ export interface Star {
 }
 
 const STORAGE_KEY = "zero:stars:warm:v1";
-const STARS_LIMIT = 120;
 
 /** 恒星色：暖金系 */
 const STAR_COLORS = ["#FBBF24", "#F59E0B", "#FDE68A", "#FB923C"];
@@ -32,8 +32,8 @@ function loadStars(): Star[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as Star[];
-    return Array.isArray(parsed) ? parsed.slice(-STARS_LIMIT) : [];
+    // 逐元素形状校验 + 上限截断（纯函数在 src/lib/starCodec，受单测保护）
+    return parseStars(JSON.parse(raw) as unknown);
   } catch {
     return [];
   }
