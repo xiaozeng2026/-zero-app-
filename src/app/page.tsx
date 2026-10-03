@@ -29,6 +29,7 @@ import {
   wakeAudio,
 } from "@/lib/audioEngine";
 import { CIRCADIAN_TOKENS } from "@/lib/circadian";
+import { CRISIS_WHISPER, detectCrisis } from "@/lib/crisis";
 import { hapticShatter } from "@/lib/haptics";
 import { useCircadianPhase } from "@/hooks/useCircadianPhase";
 import { useKeyboardInset } from "@/hooks/useVisualViewport";
@@ -54,6 +55,8 @@ const HEAVY_THRESHOLD = 10;
 interface Whisper {
   id: number;
   text: string;
+  /** 危机兜底字条：更笃定、停留更久（≥15s）、多行排版 */
+  crisis?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -229,6 +232,8 @@ export default function Home() {
 
     // 情绪重量：字数 >=10 为沉重
     const heavy = text.length >= HEAVY_THRESHOLD;
+    // 危机文本（自伤/轻生意图）：流程不变，仅替换稍后字条的文案与停留时长
+    const crisis = detectCrisis(text);
 
     setValue("");
 
@@ -248,9 +253,14 @@ export default function Home() {
     // 文字本体留在原位，模糊上浮地溶解（沉重时溶解更慢）
     startDissolve(text, x, y, heavy);
 
-    // 释放的同时，深空飘来一句光影字条（不连续重复）
+    // 释放的同时，深空飘来一句光影字条（不连续重复）；
+    // 危机文本则换成笃定、长留（18s）的陪伴字条，附全国援助渠道
     if (whisperTimer.current) clearTimeout(whisperTimer.current);
     whisperTimer.current = setTimeout(() => {
+      if (crisis) {
+        setWhisper({ id: Date.now(), text: CRISIS_WHISPER, crisis: true });
+        return;
+      }
       let phrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
       if (PHRASES.length > 1) {
         while (phrase === lastPhrase.current) {
@@ -381,12 +391,17 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* 宇宙回响：光影字条（顶层偏上） */}
+      {/* 宇宙回响：光影字条（顶层偏上）。
+          危机字条：同一视觉语言，仅改为多行、放慢呼吸、停留 18s */}
       <AnimatePresence>
         {whisper && (
           <motion.p
             key={whisper.id}
-            className="pointer-events-none fixed left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-center text-[15px] tracking-[0.35em] text-amber-50/70 sm:text-base"
+            className={`pointer-events-none fixed left-1/2 z-20 -translate-x-1/2 text-center text-[15px] text-amber-50/70 sm:text-base ${
+              whisper.crisis
+                ? "max-w-[82vw] whitespace-pre-line px-6 leading-[2.4] tracking-[0.18em]"
+                : "whitespace-nowrap tracking-[0.35em]"
+            }`}
             style={{ top: "30%", textShadow: "0 0 24px rgba(251,191,36,0.35)" }}
             initial={{ opacity: 0, filter: "blur(10px)", y: 6 }}
             animate={{
@@ -395,8 +410,8 @@ export default function Home() {
               y: 0,
             }}
             transition={{
-              duration: 7.4,
-              times: [0, 0.32, 0.72, 1],
+              duration: whisper.crisis ? 18 : 7.4,
+              times: whisper.crisis ? [0, 0.05, 0.9, 1] : [0, 0.32, 0.72, 1],
               ease: "easeInOut",
             }}
             onAnimationComplete={() => setWhisper(null)}
