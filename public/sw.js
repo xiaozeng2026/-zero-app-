@@ -1,12 +1,31 @@
 /* 归零 Zero — 离线缓存 Service Worker
  * 部署在 GitHub Pages 子路径下，scope 由注册位置天然限定。
- * 导航请求：网络优先，离线回退缓存外壳；
+ * 导航请求：网络优先，离线回退缓存外壳（回退前校验壳引用的 hash chunk
+ *           是否齐备，避免返回引用已删除 chunk 的旧壳造成白屏）；
  * 静态资源（带 hash 的 JS/CSS/字体/图标）：缓存优先 + 后台更新。
  */
-const CACHE = "zero-shell-v1";
+const CACHE = "zero-shell-v2";
 const SCOPE = self.registration.scope; // 末尾带 /，如 https://user.github.io/-zero-app-/
 const SHELL = new URL("./", SCOPE).href;
 const MANIFEST = new URL("./manifest.webmanifest", SCOPE).href;
+
+/** 纯黑应急页：离线且缓存壳不完整时使用（无控件无文案，符合应用气质） */
+const OFFLINE_FALLBACK =
+  '<!doctype html><meta charset="utf-8">' +
+  '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">' +
+  "<title>归零</title><style>html,body{margin:0;height:100%;background:#000}</style>";
+
+/** 校验缓存壳引用的所有 _next/static 资源是否仍在缓存中（新旧版本错配防护） */
+async function shellUsable(html) {
+  const refs = [
+    ...html.matchAll(/(?:src|href)="([^"]*\/_next\/static\/[^"]+)"/g),
+  ].map((m) => m[1]);
+  for (const ref of refs) {
+    const hit = await caches.match(new URL(ref, SCOPE), { ignoreSearch: true });
+    if (!hit) return false;
+  }
+  return true;
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -45,7 +64,17 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE).then((cache) => cache.put(SHELL, copy));
           return res;
         })
-        .catch(() => caches.match(SHELL))
+        .catch(async () => {
+          const cached = await caches.match(SHELL);
+          if (cached) {
+            const html = await cached.clone().text();
+            if (await shellUsable(html)) return cached;
+          }
+          return new Response(OFFLINE_FALLBACK, {
+            status: 503,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        })
     );
     return;
   }

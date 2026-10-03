@@ -340,7 +340,7 @@ export default function NebulaWonders({
                 className="absolute inset-0"
                 style={{
                   background: c.cold,
-                  filter: `blur(${c.blur}px)`,
+                  filter: `blur(calc(${c.blur}px * var(--zero-blur-scale, 1)))`,
                   opacity: c.coldAlpha,
                   willChange: "opacity",
                   // 不加 CSS transition——rAF 每帧直写 opacity，lerp 本身就是平滑的
@@ -354,7 +354,7 @@ export default function NebulaWonders({
                 className="absolute inset-0"
                 style={{
                   background: c.hot,
-                  filter: `blur(${c.blur}px)`,
+                  filter: `blur(calc(${c.blur}px * var(--zero-blur-scale, 1)))`,
                   opacity: 0,
                   transition: "opacity 4s ease-in-out",
                   willChange: "opacity",

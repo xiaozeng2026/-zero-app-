@@ -97,81 +97,114 @@ export function ensureAudio(): Promise<void> {
   if (readyPromise) return readyPromise;
 
   readyPromise = (async () => {
-    await Tone.start();
-    const tok = CIRCADIAN_TOKENS[currentPhase].audio;
+    /** 本次初始化已创建的节点：失败时逐一 dispose，避免重试后 Drone 叠音 */
+    const created: { dispose?: () => void }[] = [];
+    try {
+      await Tone.start();
+      const tok = CIRCADIAN_TOKENS[currentPhase].audio;
 
-    const reverb = new Tone.Reverb({ decay: 13, wet: tok.reverbWet });
-    await reverb.generate();
-    reverb.toDestination();
-    reverbNode = reverb;
+      const reverb = new Tone.Reverb({ decay: 13, wet: tok.reverbWet });
+      created.push(reverb);
+      await reverb.generate();
+      reverb.toDestination();
+      reverbNode = reverb;
 
-    // 同辈之网专用：22 秒海量混响，像从宇宙边缘折返的回响
-    const massive = new Tone.Reverb({ decay: 22, wet: 0.92 });
-    await massive.generate();
-    const massiveBus = new Tone.Gain(0.5).toDestination();
-    massive.connect(massiveBus);
+      // 同辈之网专用：22 秒海量混响，像从宇宙边缘折返的回响
+      const massive = new Tone.Reverb({ decay: 22, wet: 0.92 });
+      created.push(massive);
+      await massive.generate();
+      const massiveBus = new Tone.Gain(0.5).toDestination();
+      created.push(massiveBus);
+      massive.connect(massiveBus);
 
-    // 极低音量低频 Drone：两支微失谐正弦 + 低通，模拟太空嗡鸣
-    const droneGain = new Tone.Gain(0).toDestination();
-    droneGain.gain.rampTo(tok.droneGain, 6); // 6 秒缓慢浮现
-    droneGainNode = droneGain;
-    const droneFilter = new Tone.Filter(150, "lowpass");
-    droneFilter.connect(droneGain);
-    [55, 55.4, 110.2].forEach((freq, i) => {
-      const osc = new Tone.Oscillator(freq, "sine").start();
-      const oscGain = new Tone.Gain(i === 2 ? 0.25 : 1);
-      osc.connect(oscGain);
-      oscGain.connect(droneFilter);
-    });
-    // 截止频率缓慢起伏，让 Drone 有"呼吸"（区间随时段变化）
-    const lfo = new Tone.LFO({
-      frequency: 0.08,
-      min: tok.droneLfo.min,
-      max: tok.droneLfo.max,
-    })
-      .start()
-      .connect(droneFilter.frequency);
-    droneLfo = lfo;
+      // 极低音量低频 Drone：两支微失谐正弦 + 低通，模拟太空嗡鸣
+      const droneGain = new Tone.Gain(0).toDestination();
+      created.push(droneGain);
+      droneGain.gain.rampTo(tok.droneGain, 6); // 6 秒缓慢浮现
+      droneGainNode = droneGain;
+      const droneFilter = new Tone.Filter(150, "lowpass");
+      created.push(droneFilter);
+      droneFilter.connect(droneGain);
+      [55, 55.4, 110.2].forEach((freq, i) => {
+        const osc = new Tone.Oscillator(freq, "sine").start();
+        created.push(osc);
+        const oscGain = new Tone.Gain(i === 2 ? 0.25 : 1);
+        created.push(oscGain);
+        osc.connect(oscGain);
+        oscGain.connect(droneFilter);
+      });
+      // 截止频率缓慢起伏，让 Drone 有"呼吸"（区间随时段变化）
+      const lfo = new Tone.LFO({
+        frequency: 0.08,
+        min: tok.droneLfo.min,
+        max: tok.droneLfo.max,
+      })
+        .start()
+        .connect(droneFilter.frequency);
+      created.push(lfo);
+      droneLfo = lfo;
 
-    // 水滴 / 木琴：三角波 + 短包络，经混响
-    const drop = new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.002, decay: 0.35, sustain: 0, release: 0.6 },
-      volume: -22,
-    }).connect(reverb);
+      // 水滴 / 木琴：三角波 + 短包络，经混响
+      const drop = new Tone.Synth({
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.002, decay: 0.35, sustain: 0, release: 0.6 },
+        volume: -22,
+      }).connect(reverb);
+      created.push(drop);
 
-    // 回车叹息：正弦 Sub-bass（沉重情绪触发 G1 极低频），同时入海量混响长尾
-    const bass = new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.04, decay: 1.6, sustain: 0.25, release: 4.5 },
-      volume: -9,
-    }).toDestination();
-    bass.connect(reverb);
-    bass.connect(massive);
+      // 回车叹息：正弦 Sub-bass（沉重情绪触发 G1 极低频），同时入海量混响长尾
+      const bass = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.04, decay: 1.6, sustain: 0.25, release: 4.5 },
+        volume: -9,
+      }).toDestination();
+      created.push(bass);
+      bass.connect(reverb);
+      bass.connect(massive);
 
-    // 恒星悬停：空灵五声音阶
-    const bell = new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.01, decay: 1.4, sustain: 0, release: 2.6 },
-      volume: -15,
-    }).connect(reverb);
+      // 恒星悬停：空灵五声音阶
+      const bell = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.01, decay: 1.4, sustain: 0, release: 2.6 },
+        volume: -15,
+      }).connect(reverb);
+      created.push(bell);
 
-    // 轻度情绪：Karplus-Strong 拨弦，轻快空灵
-    const pluck = new Tone.PluckSynth({
-      attackNoise: 1.2,
-      dampening: 4200,
-      resonance: 0.92,
-      volume: -13,
-    }).connect(reverb);
+      // 轻度情绪：Karplus-Strong 拨弦，轻快空灵
+      const pluck = new Tone.PluckSynth({
+        attackNoise: 1.2,
+        dampening: 4200,
+        resonance: 0.92,
+        volume: -13,
+      }).connect(reverb);
+      created.push(pluck);
 
-    // 同辈之网：极远处风铃，只进 22s 海量混响
-    const peerBell = new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.02, decay: 2.2, sustain: 0, release: 4 },
-      volume: -19,
-    }).connect(massive);
+      // 同辈之网：极远处风铃，只进 22s 海量混响
+      const peerBell = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.02, decay: 2.2, sustain: 0, release: 4 },
+        volume: -19,
+      }).connect(massive);
+      created.push(peerBell);
 
-    engine = { drop, bass, bell, pluck, peerBell };
+      engine = { drop, bass, bell, pluck, peerBell };
+    } catch (err) {
+      // 微信 WKWebView 等环境首次手势可能仍被音频策略拒绝：
+      // 释放半成品节点并清空状态，允许下一次手势重新初始化（否则永久静音）
+      for (const node of created) {
+        try {
+          node.dispose?.();
+        } catch {
+          /* 静默 */
+        }
+      }
+      engine = null;
+      reverbNode = null;
+      droneGainNode = null;
+      droneLfo = null;
+      readyPromise = null;
+      throw err;
+    }
   })();
 
   return readyPromise;
@@ -263,7 +296,25 @@ export function wakeAudio(): void {
   };
 
   if (ctx.state === "suspended") {
-    ctx.resume().then(fadeIn).catch(() => {});
+    ctx
+      .resume()
+      .then(fadeIn)
+      .catch(() => {
+        // iOS Safari / 微信 WKWebView：从后台返回时没有用户手势，resume 会被拒。
+        // 挂一次性手势监听，下一次触摸/按键时再恢复并淡入，否则 Drone 永久静音。
+        const rearm = () => {
+          window.removeEventListener("pointerdown", rearm);
+          window.removeEventListener("keydown", rearm);
+          window.removeEventListener("touchend", rearm);
+          const c = rawCtx();
+          if (!c) return;
+          if (c.state === "suspended") c.resume().then(fadeIn).catch(() => {});
+          else fadeIn();
+        };
+        window.addEventListener("pointerdown", rearm, { once: true });
+        window.addEventListener("keydown", rearm, { once: true });
+        window.addEventListener("touchend", rearm, { once: true });
+      });
   } else {
     // 上下文从未真正挂住（快速切回）：直接平滑回弹
     fadeIn();

@@ -9,6 +9,20 @@
   --font-night: "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", "STSong", "SimSun", serif;
 }
 
+/*
+ * 手机 GPU 降档：小屏（iPhone SE ~ Pro Max 宽度均 ≤640px 逻辑像素）
+ * 把星云大半径模糊减半，降低 WKWebView 栅格化开销与白屏被杀概率。
+ * 视觉上小屏肉眼几乎不可察（屏幕小，模糊半径等比缩小）。
+ */
+:root {
+  --zero-blur-scale: 1;
+}
+@media (max-width: 640px) {
+  :root {
+    --zero-blur-scale: 0.5;
+  }
+}
+
 html,
 body {
   height: 100%;
@@ -21,8 +35,22 @@ body {
   user-select: none;
 }
 
+/* 全局禁选不能误伤输入框：iOS WKWebView 上否则可能影响光标定位/选词编辑 */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 ::selection {
   background: transparent;
+}
+
+/* 输入框内选词仍需可见高亮（全局选择色被上面清空） */
+input::selection,
+textarea::selection {
+  background: rgba(251, 191, 36, 0.28);
+  color: inherit;
 }
 
 /* ---- 星云气体：几乎不可察的超慢漂移（70~105s） ---- */

@@ -30,6 +30,7 @@ import {
 import { CIRCADIAN_TOKENS } from "@/lib/circadian";
 import { hapticShatter } from "@/lib/haptics";
 import { useCircadianPhase } from "@/hooks/useCircadianPhase";
+import { useKeyboardInset } from "@/hooks/useVisualViewport";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useStarStorage } from "@/hooks/useStarStorage";
 import { RippleWave, useFxLayer, type DissolveText } from "@/hooks/useFxLayer";
@@ -74,6 +75,8 @@ export default function Home() {
   const phase = useCircadianPhase();
   /* ---- 页面可见性（环保休眠信号源） ---- */
   const hidden = usePageVisibility();
+  /* ---- iOS / 微信 WKWebView 软键盘遮挡高度（px），抬起底部输入区 ---- */
+  const kbInset = useKeyboardInset();
   /** 回归薄纱纪元：每次从隐藏→可见 +1（渲染期检测外部 store 翻转，首挂天然不触发） */
   const [veilEpoch, setVeilEpoch] = useState(0);
   const [prevHidden, setPrevHidden] = useState(hidden);
@@ -104,18 +107,28 @@ export default function Home() {
     applyCircadianPhase(phase);
   }, [phase]);
 
-  /* ---- 首次点击 / 按键即解锁音频 ---- */
+  /* ---- 首次点击 / 按键即解锁音频 ----
+     微信 WKWebView 等环境首次可能被音频策略拒绝：失败时保留监听，
+     下一次手势继续尝试（ensureAudio 内部会清理半成品并允许重建） */
   useEffect(() => {
     const unlock = () => {
-      ensureAudio().catch(() => {});
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
+      ensureAudio()
+        .then(() => {
+          window.removeEventListener("pointerdown", unlock);
+          window.removeEventListener("keydown", unlock);
+          window.removeEventListener("touchend", unlock);
+        })
+        .catch(() => {
+          /* 保留监听，等待下一次手势 */
+        });
     };
     window.addEventListener("pointerdown", unlock);
     window.addEventListener("keydown", unlock);
+    window.addEventListener("touchend", unlock);
     return () => {
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchend", unlock);
     };
   }, []);
 
@@ -249,7 +262,7 @@ export default function Home() {
         style={{
           background:
             "radial-gradient(ellipse 72% 58% at 50% 46%, rgba(255,150,70,0.17) 0%, rgba(190,60,30,0.13) 38%, rgba(120,20,25,0.06) 58%, rgba(0,0,0,0) 74%)",
-          filter: "blur(70px)",
+          filter: "blur(calc(70px * var(--zero-blur-scale, 1)))",
         }}
       />
 
@@ -370,8 +383,14 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* 唯一的 UI：底部居中无边框输入框 + 呼吸暖光 / 地平线发丝线（纯 CSS 聚焦反馈） */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-[13vh] z-30 flex justify-center px-8">
+      {/* 唯一的 UI：底部居中无边框输入框 + 呼吸暖光 / 地平线发丝线（纯 CSS 聚焦反馈）。
+          iOS/微信键盘弹起时随 visualViewport 抬升，底部留 Home 指示条安全区 */}
+      <div
+        className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-8"
+        style={{
+          bottom: `calc(13vh + ${kbInset}px + env(safe-area-inset-bottom, 0px))`,
+        }}
+      >
         <div className="group relative flex w-full max-w-[520px] flex-col items-center">
           {/* 背后暖光：静息近无，聚焦时琥珀→暗紫缓缓亮起 */}
           <div
@@ -412,7 +431,7 @@ export default function Home() {
               submitEmotion();
             }}
             placeholder="把情绪留在这里..."
-            className="pointer-events-auto relative z-10 w-full border-none bg-transparent text-center text-[17px] font-light tracking-[0.2em] text-amber-50/55 caret-amber-300/80 outline-none transition-[color,text-shadow] duration-700 placeholder:tracking-[0.32em] placeholder:text-neutral-400/40 placeholder:transition-opacity duration-700 focus:text-amber-50/90 [text-shadow:0_0_14px_rgba(251,191,36,0.12)] focus:[text-shadow:0_0_26px_rgba(251,191,36,0.45)] focus:placeholder:opacity-30"
+            className="pointer-events-auto relative z-10 w-full select-text border-none bg-transparent text-center text-[17px] font-light tracking-[0.2em] text-amber-50/55 caret-amber-300/80 outline-none transition-[color,text-shadow] duration-700 placeholder:tracking-[0.32em] placeholder:text-neutral-400/40 placeholder:transition-opacity duration-700 focus:text-amber-50/90 [text-shadow:0_0_14px_rgba(251,191,36,0.12)] focus:[text-shadow:0_0_26px_rgba(251,191,36,0.45)] focus:placeholder:opacity-30"
           />
 
           {/* 地平线：静息短而隐，聚焦/有字时延展并透出琥珀辉光 */}

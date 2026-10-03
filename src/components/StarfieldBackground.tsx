@@ -13,7 +13,7 @@
  * 环保休眠：paused=true 时暂停 tsparticles 容器渲染（CPU/GPU 降载）。
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Particles, ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
@@ -41,14 +41,26 @@ export default function StarfieldBackground({
   const containerRef = useRef<Container | null>(null);
   const tok = CIRCADIAN_TOKENS[phase];
 
+  /* 手机降档：iPhone DPR=3 时 retina 画布像素量 9 倍，是 WKWebView
+     GPU 重绘/被杀的主因之一。小屏关 retina（物理像素仍够锐利）、
+     粒子 150 减至 90、帧率 60 降至 30（缓慢漂浮肉眼无差）。SSG 首帧固定 false，挂载后检测。 */
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const update = () => setMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const options = useMemo<ISourceOptions>(
     () => ({
       fullScreen: false,
-      fpsLimit: 60,
-      detectRetina: true,
+      fpsLimit: mobile ? 30 : 60,
+      detectRetina: !mobile,
       background: { color: { value: "transparent" } },
       particles: {
-        number: { value: 150, density: { enable: true } },
+        number: { value: mobile ? 90 : 150, density: { enable: true } },
         // 大部分纯白（重复 4 份加权），少部分浅蓝与暗金
         color: {
           value: ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#e0f2fe", "#fef3c7"],
@@ -74,7 +86,7 @@ export default function StarfieldBackground({
       },
       detectOn: "window",
     }),
-    [tok.starSpeed]
+    [tok.starSpeed, mobile]
   );
 
   /* 环保休眠：暂停 / 恢复粒子容器（选项变化导致的引擎重建后重新抓一次状态） */
@@ -101,7 +113,7 @@ export default function StarfieldBackground({
         style={{
           background:
             "radial-gradient(circle, rgba(138,92,214,0.5) 0%, rgba(96,60,170,0.22) 48%, transparent 72%)",
-          filter: "blur(120px)",
+          filter: "blur(calc(120px * var(--zero-blur-scale, 1)))",
           opacity: 0.15,
           willChange: "transform, opacity",
         }}
@@ -114,7 +126,7 @@ export default function StarfieldBackground({
         style={{
           background:
             "radial-gradient(circle, rgba(37,99,196,0.5) 0%, rgba(24,60,140,0.22) 50%, transparent 74%)",
-          filter: "blur(120px)",
+          filter: "blur(calc(120px * var(--zero-blur-scale, 1)))",
           opacity: 0.34,
           willChange: "transform, opacity",
         }}
