@@ -18,10 +18,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import StarfieldBackground from "@/components/StarfieldBackground";
 import NebulaWonders from "@/components/NebulaWonders";
+import StarCanvas from "@/components/StarCanvas";
 import {
   applyCircadianPhase,
   ensureAudio,
-  playBellThrottled,
   playDrop,
   playSubmit,
   primeAudio,
@@ -183,9 +183,6 @@ export default function Home() {
     []
   );
 
-  /* ---- 恒星悬停：放大发亮 + 五声音阶 ---- */
-  const touchStar = useCallback(() => playBellThrottled(), []);
-
   /* ---- 文字溶解结束 → 自适应涟漪 + 星尘 + 恒星（情绪彻底释放） ---- */
   const releaseEmotion = useCallback(
     (d: DissolveText) => {
@@ -312,54 +309,8 @@ export default function Home() {
         ))}
       </div>
 
-      {/* 星穹：历史恒星（中层） */}
-      {hydrated && (
-        <div className="pointer-events-none fixed inset-0 z-10">
-          <AnimatePresence>
-            {stars.map((s) => (
-              <motion.div
-                key={s.id}
-                className="absolute"
-                style={{ left: `${s.x}%`, top: `${s.y}%` }}
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: "spring", stiffness: 160, damping: 14 }}
-              >
-                {/* 可交互命中区（放大，方便悬停/触摸） */}
-                <motion.button
-                  type="button"
-                  aria-label="一颗恒星"
-                  className="pointer-events-auto block cursor-pointer rounded-full border-0 bg-transparent p-0"
-                  style={{ width: s.size + 18, height: s.size + 18, x: "-50%", y: "-50%" }}
-                  whileHover={{ scale: 2 }}
-                  whileTap={{ scale: 1.7 }}
-                  onMouseEnter={touchStar}
-                  onTouchStart={touchStar}
-                >
-                  {/* 内层高亮核心 + 低频闪烁 */}
-                  <motion.span
-                    className="absolute left-1/2 top-1/2 block rounded-full"
-                    style={{
-                      width: s.size,
-                      height: s.size,
-                      marginLeft: -s.size / 2,
-                      marginTop: -s.size / 2,
-                      background: `radial-gradient(circle, #FFFBEB 0%, ${s.color} 42%, rgba(245,158,11,0.55) 68%, transparent 78%)`,
-                      boxShadow: `0 0 6px rgba(251,191,36,0.9), 0 0 22px rgba(245,158,11,0.55), 0 0 52px rgba(245,158,11,0.28)`,
-                    }}
-                    animate={{ opacity: [0.78, 1, 0.78] }}
-                    transition={{
-                      duration: s.twinkle,
-                      ease: "easeInOut",
-                      repeat: Infinity,
-                    }}
-                  />
-                </motion.button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
+      {/* 星穹：历史恒星（中层）—— 单 canvas 绘制 + 不可见命中按钮（悬停音符链路在组件内保持不变） */}
+      {hydrated && <StarCanvas stars={stars} />}
 
       {/* 回车瞬间：文字在原位模糊上浮、溶解于宇宙（1s 后触发超新星） */}
       <AnimatePresence>
