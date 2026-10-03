@@ -542,6 +542,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-03 | `a9ac920` | 修复手机端（iPhone 微信 WKWebView）：chunk 404 白屏无感自救重载 / 输入框随 visualViewport 键盘抬升+安全区 / input user-select 恢复 / 音频初始化失败可重试+唤醒手势重试 / 小屏 GPU 降档（blur 减半、粒子 90、关 retina、30fps）/ sw.js v2 壳完整性校验；单测 40 例 |
 | 2026-10-03 | `960ab17` | 测试：引入 Vitest + jsdom + Testing Library；生物钟单测 24 例（纯逻辑 + 水合不变量回归守卫，变异验证旧实现必红） |
 | 2026-10-03 | `e746577` | 修复：生物钟时段 SSG/水合相位漂移（初值固定 evening，挂载后注入本地时段；深夜访客此前看到的是构建机 UTC 白天蓝纱）；.sim-root 加入 eslint ignores |
 | 2026-10-02 | `eda781b` | 修复：ParticlesProvider init 提为模块级常量（接入 props 后重渲染致 init 引用变化、tsparticles 引擎抛错） |
@@ -558,4 +559,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.5 · 更新于 2026-10-03，基于 commit 960ab17 的代码现状（生物钟单测 / SSG 水合一致性）。*
+*文档版本 v1.6 · 更新于 2026-10-03，基于 commit a9ac920 的代码现状（手机端 WKWebView 适配 / chunk 自救 / 单测 40 例）。*
