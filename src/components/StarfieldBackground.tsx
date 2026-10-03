@@ -13,7 +13,7 @@
  * 环保休眠：paused=true 时暂停 tsparticles 容器渲染（CPU/GPU 降载）。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Particles, ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
@@ -31,7 +31,7 @@ const initSlim = async (engine: Engine): Promise<void> => {
   await loadSlim(engine);
 };
 
-export default function StarfieldBackground({
+function StarfieldBackground({
   phase = "evening",
   paused = false,
 }: {
@@ -159,3 +159,9 @@ export default function StarfieldBackground({
     </div>
   );
 }
+
+/**
+ * memo 隔离：props（phase 字符串 / paused 布尔）只在生物钟换天与标签隐藏时变化，
+ * 点击涟漪等高频父组件 state 不再触发 tsparticles 树（150 粒子）重协调。
+ */
+export default memo(StarfieldBackground);

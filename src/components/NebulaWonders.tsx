@@ -19,7 +19,7 @@
  * - 全程不触发 React 重渲染；blur 滤镜静态，只有 opacity/transform 变化
  */
 
-import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
+import { memo, useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 
 interface CloudDef {
@@ -135,7 +135,7 @@ function getReducedMotion(): boolean {
  *                组件只读，不写入、不改变其冷却循环
  * @param dim     整体压暗系数（生物钟：深夜 0.82 让纯黑主导），默认 1
  */
-export default function NebulaWonders({
+function NebulaWonders({
   tempRef,
   dim = 1,
 }: {
@@ -385,3 +385,9 @@ export default function NebulaWonders({
     </div>
   );
 }
+
+/**
+ * memo 隔离：tempRef 为稳定引用、dim 每日仅换天时变化；
+ * 点击涟漪等父组件高频 state 不再重渲染多层 180~200px 全屏模糊。
+ */
+export default memo(NebulaWonders);

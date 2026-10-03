@@ -13,7 +13,7 @@
  *   （onMouseEnter/onTouchStart → playBellThrottled → bell → 13s 混响）。
  */
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { Star } from "@/hooks/useStarStorage";
 import { playBellThrottled } from "@/lib/audioEngine";
 import { ENTRANCE_MS, drawStar } from "@/lib/starRender";
@@ -21,7 +21,13 @@ import { ENTRANCE_MS, drawStar } from "@/lib/starRender";
 /** 触摸放大状态的最长保持（ms），兜底 touchend 丢失 */
 const TAP_HOLD_MS = 650;
 
-export default function StarCanvas({ stars }: { stars: Star[] }) {
+/**
+ * 绘制帧率上限：闪烁周期 3~6s、入场 600ms，30fps 视觉无差，
+ * 却能把 120 张柔光位图的全屏绘制/合成开销减半（高分屏集显点击掉帧的余量）。
+ */
+const FRAME_MS = 1000 / 30;
+
+function StarCanvas({ stars }: { stars: Star[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** 最新恒星列表（rAF 读取，不触发重订阅） */
   const starsRef = useRef<Star[]>(stars);
@@ -52,11 +58,9 @@ export default function StarCanvas({ stars }: { stars: Star[] }) {
     const resize = () => {
       w = window.innerWidth;
       h = window.innerHeight;
-      // 与流星层一致的移动端 GPU 降档：窄屏 DPR 封顶 1.5
-      const dpr = Math.min(
-        window.devicePixelRatio || 1,
-        w <= 640 ? 1.5 : 2
-      );
+      // DPR 统一封顶 1.5：恒星为柔光径向图，1.5 与 2 肉眼无差，
+      // 但高分屏（4K/Retina/Windows 200%）画布像素量可降约 44%
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       canvas.style.width = `${w}px`;
@@ -67,7 +71,13 @@ export default function StarCanvas({ stars }: { stars: Star[] }) {
     window.addEventListener("resize", resize);
 
     let raf = 0;
+    let lastDraw = -Infinity;
     const render = (ts: number) => {
+      // 隐藏时浏览器自动停 rAF；始终先续下一帧，再做 30fps 抽帧
+      if (!document.hidden) raf = requestAnimationFrame(render);
+      if (ts - lastDraw < FRAME_MS) return;
+      lastDraw = ts;
+
       const list = starsRef.current;
       ctx.clearRect(0, 0, w, h);
 
@@ -107,8 +117,6 @@ export default function StarCanvas({ stars }: { stars: Star[] }) {
           if (ts - t > ENTRANCE_MS + 200) born.delete(id);
         }
       }
-
-      if (!document.hidden) raf = requestAnimationFrame(render);
     };
     raf = requestAnimationFrame(render);
 
@@ -174,3 +182,10 @@ export default function StarCanvas({ stars }: { stars: Star[] }) {
     </div>
   );
 }
+
+/**
+ * memo 隔离：stars 引用仅在新星落盘/水合时变化；
+ * 涟漪、输入等父组件高频 state 不再重协调 120 个命中按钮。
+ * canvas 绘制循环在组件内部自驱，与 React 渲染完全无关。
+ */
+export default memo(StarCanvas);
