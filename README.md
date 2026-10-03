@@ -3,8 +3,8 @@
 > 一片可以把情绪丢进去的浩瀚深空。
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
-> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA × 生物钟 × 触觉 × 环保休眠」
-> 文档更新日期：2026-10-02（基于 commit eda781b）
+> 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA × 生物钟 × 触觉 × 环保休眠 × 星穹导出」
+> 文档更新日期：2026-10-03（基于 commit 5ac507f）
 
 ---
 
@@ -442,7 +442,30 @@ interface Star {
 `src/lib/haptics.ts` 对 Vibration API 的极简封装（try/catch 防御跨域 iframe；iOS Safari 无此 API，静默无效）：
 
 - **点击涟漪**：`navigator.vibrate(10)`——极轻一啄。只挂在 window pointerup 监听里；近场共鸣/同辈之网的自动涟漪走 `rippleApiRef`，**不会误震**。
-- **回车粉碎**：字数 <10 → `vibrate(20)` 短震；字数 ≥10 → `vibrate([30,50,30])` 震-停-震，模拟重物落地的物理回弹。
+- **回车粉碎**：重量 <0.5 → `vibrate(20)` 短震；重量 ≥0.5 → `vibrate([30,50,30])` 震-停-震，模拟重物落地的物理回弹。
+
+### 5.16 星穹导出（Starscape Export）
+
+把当前星穹（localStorage 中的全部恒星）一次性收为两份本地文件，全程零网络、零后端、零可见 UI：
+
+- **PNG 海报**：离屏 canvas 1080×1920（9:16），深空渐变底 + 与屏幕完全相同的恒星位图/闪烁原语渲染（`src/lib/starRender.ts` 为屏幕层与海报层共用，所见即所得），底部仅一条发丝线与疏排落款「归零 ZERO」，无任何说明文字；
+- **JSON 数据**：`{ app:"zero", format:"zero-starscape/1", exportedAt, count, stars[] }`，逐字段保留恒星记录；
+- 文件名均为 `zero-starscape-YYYYMMDD-HHMM.{png,json}`，`Blob` + `a[download]` 本地落盘；空星穹不产生下载。
+
+**入口与取舍（极简原则下为什么这样设计）：**
+
+| 备选 | 否决理由 |
+|---|---|
+| 导出按钮/图标 | 直接破坏「界面只有一个输入框」的冻结项 |
+| 双击 / 长按分别导出 PNG、JSON | 两种隐式手势形成看不见的模式，用户无从学习 |
+| 长按输入框 | **采用**：单一静默手势，同时给出「一张纪念图 + 一份可移植数据」 |
+
+关键消歧：**只有输入框为空时，长按 700ms 才布防导出**。空框没有光标定位/选词需求；一旦框内有文字，长按完全保留系统原生语义（选词、光标、粘贴菜单），不做任何拦截。其余守卫：
+
+- `pointerdown` 仅主键布防；`pointermove` 漂移 >12px、`pointerup/cancel/leave` 立即取消；
+- 空框布防期间 `contextmenu` 阻止默认（避免安卓长按弹出系统菜单与导出同时发生）；有文字时放行；iOS 对空框加 `-webkit-touch-callout:none`；
+- 触发瞬间仅一次 `navigator.vibrate(10)` 极轻确认，无声响、无字条、无弹窗；
+- 手势只新增 pointer 事件，不触碰打字水滴、回车提交与空白涟漪（空白涟漪的 `closest('input')` 豁免天然覆盖 pointerup）。
 
 ---
 
@@ -465,18 +488,19 @@ npm test           # Vitest 单测（jsdom，src/**/*.test.{ts,tsx}）
 ### 手工验收清单
 
 1. 点击星空空白：出现紫/青发光圆环，约 2.5s 消失；点输入框/恒星/字条**不**出涟漪。
-2. 输入 <10 字回车：青蓝快环、青白漂浮星尘、拨弦音；输入 ≥10 字：深紫慢巨环、琥珀下坠星尘、G1 低音。
+2. 输入「哈哈今天真开心」回车：青蓝快环、青白漂浮星尘、拨弦音；输入「我真的撑不下去了」：深紫慢巨环、琥珀下坠星尘、G1 低音（按情绪重量 0~1 连续插值，不再看字数二态）。
 3. 回车后观察背景暖光（热力层 + 星云暖层 4s 内「燃烧」为暗金琥珀），约 2.5 分钟完全冷却回深蓝。
 4. 刷新页面：恒星仍在（localStorage）。
 5. 等待 15–45s：屏幕边缘出现极淡涟漪并伴随遥远风铃。
 6. 鼠标在星空间缓慢移动：附近星云被轻轻吸引、微微增亮，指尖有柔光跟随；移出窗口后缓慢回弹。
 7. 触屏（手机/模拟器）：手指按住星空拖动，光斑跟手、附近星云发亮；抬起熄灭。按在输入框上不触发。
 8. 切到其他标签页：标题变「…」，音频静默；切回恢复标题与音频。
-9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v1` activated；Network 勾选 Offline 刷新仍可打开。
+9. DevTools → Application → Manifest 可识别三图标、standalone；Service Workers 显示 `zero-shell-v2` activated；Network 勾选 Offline 刷新仍可打开。
 10. 中文输入法组词中按回车：仅确认拼音/选字，不提交情绪；整词上屏后只响一声水滴。
 11. 生物钟：按当前本地时间整站氛围不同（深夜更黑更慢混响更大）；可临时改系统时间跨边界验证自动换天。**注意 SSG 初帧必须是 evening 基准**：静态 HTML 不含 `#0a1c3d`/`opacity:0.28` 等任何时段色值，水合数秒后才平滑显出深夜黑纱（验 fiber props 与内联 style 一致，勿只看 console）。
 12. 切走标签页：标题变「…」，DevTools 可见 tsparticles 暂停、AudioContext suspended；切回时黑纱缓出、Drone 平滑淡入。
 13. Console 无 `Start time must be strictly greater …`、无 tsparticles / React key 报错。
+14. **星穹导出**：清空输入框后**长按输入框 700ms**，浏览器同时下载 `zero-starscape-*.png`（1080×1920）与 `*.json`；短按、滑动、框内有文字时长按均不触发；恒星悬停音符、空白涟漪等常规交互无变化。危机词（如「不想活了」）回车：溶解/星尘/恒星流程如常，字条改为 18s 多行陪伴文案并附援助热线。
 
 > 自动化浏览器在隐藏标签页会冻结 rAF，测流星/冷却时确认 `document.visibilityState === "visible"`；浏览器脚本内 `await sleep` 累计超过约 15s 可能导致 evaluate 返回 undefined，拆成 6–8s 短脚本执行。
 
@@ -542,6 +566,11 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-03 | `5ac507f` | 星穹导出：长按空输入框 700ms 静默导出 1080×1920 PNG 海报 + zero-starscape/1 JSON（空框才布防，有文字保留系统长按）；恒星渲染原语抽 src/lib/starRender.ts 屏幕/海报共用 |
+| 2026-10-03 | `94b1f7d` | 重构：120 颗恒星从 240 个常驻 motion 动画迁到单 canvas（位图缓存+全局时间闪烁+easeOutBack 入场），DOM 仅留透明命中按钮，悬停音符音频链路零改动 |
+| 2026-10-03 | `8e0cad7` | 修复：中文 IME 打字水滴误判（composition/inputType 双守卫，组词静默、整词上屏仅一声） |
+| 2026-10-03 | `365ffc0` | 情绪重量本地加权词典：0~1 连续值替代字数≥10 二态，涟漪/星尘/音效按重量插值（src/lib/emotionWeight.ts） |
+| 2026-10-03 | `02cf681` | 危机文本本地兜底：40 词本地表命中后流程不变，字条改 18s 笃定陪伴文案并附 12356 / 010-82951332 援助热线（src/lib/crisis.ts，零网络） |
 | 2026-10-03 | `c1104b3` | 修复手机端点击无声：Tone.start() 在真实 AudioContext 创建前只 resume DummyContext，真实 Context 在 await 微任务中以 suspended 永久静音；新增 primeAudio() 手势同步解锁（touchstart 等 + WeixinJSBridgeReady），播放统一 whenReady 兜底；单测 42 例 |
 | 2026-10-03 | `a9ac920` | 修复手机端（iPhone 微信 WKWebView）：chunk 404 白屏无感自救重载 / 输入框随 visualViewport 键盘抬升+安全区 / input user-select 恢复 / 音频初始化失败可重试+唤醒手势重试 / 小屏 GPU 降档（blur 减半、粒子 90、关 retina、30fps）/ sw.js v2 壳完整性校验；单测 40 例 |
 | 2026-10-03 | `960ab17` | 测试：引入 Vitest + jsdom + Testing Library；生物钟单测 24 例（纯逻辑 + 水合不变量回归守卫，变异验证旧实现必红） |
@@ -560,4 +589,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.7 · 更新于 2026-10-03，基于 commit c1104b3 的代码现状（微信 WKWebView 音频手势同步解锁 / 单测 42 例）。*
+*文档版本 v1.8 · 更新于 2026-10-03，基于 commit 5ac507f 的代码现状（危机兜底 / 情绪重量连续值 / IME 加固 / 恒星 canvas 化 / 星穹导出，单测 42 例）。*
