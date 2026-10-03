@@ -24,6 +24,11 @@ import { motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import { playBell, playPeerBell } from "@/lib/audioEngine";
 import { CIRCADIAN_TOKENS, type CircadianPhase } from "@/lib/circadian";
+import {
+  emotionHeat,
+  emotionStardust,
+  type RippleColors,
+} from "@/lib/emotionWeight";
 import { hapticTick } from "@/lib/haptics";
 
 /* ------------------------------------------------------------------ */
@@ -46,6 +51,8 @@ export interface RippleFx {
   scaleTo?: number;
   duration?: number;
   peak?: number;
+  /** 连续重量插值出的自定义配色（不给则按 tone 取） */
+  colors?: RippleColors;
 }
 
 /** 回车时正在溶解的文字 */
@@ -54,8 +61,8 @@ export interface DissolveText {
   text: string;
   x: number;
   y: number;
-  /** 是否沉重情绪（字数 >= 10） */
-  heavy: boolean;
+  /** 情绪重量 0（轻灵）~ 1（沉重） */
+  weight: number;
 }
 
 interface Meteor {
@@ -90,11 +97,6 @@ const RIPPLE_TONES: Record<
     core: "rgba(251,191,36,0.14)",
   },
 };
-
-/** 沉重情绪：暗金 / 琥珀 */
-const CONFETTI_HEAVY = ["#B45309", "#D97706", "#F59E0B", "#FBBF24", "#FDE68A"];
-/** 轻度情绪：青蓝 / 亮白 */
-const CONFETTI_LIGHT = ["#67E8F9", "#7DD3FC", "#BAE6FD", "#A5F3FC", "#FFFFFF"];
 
 /** 星云温度冷却半衰期（秒）：约 5 个半衰期 ≈ 2.5 分钟回到冰冷深空 */
 const NEBULA_COOL_HALFLIFE = 28;
@@ -355,8 +357,8 @@ export function useFxLayer(
     return () => clearTimeout(timer);
   }, []);
 
-  /* ---- 在输入框位置放一束星尘（按情绪重量自适应：轻=青白少而飘，重=琥珀多而坠） ---- */
-  const burstStardust = useCallback((heavy: boolean) => {
+  /* ---- 在输入框位置放一束星尘（按情绪重量连续插值：轻=青白少而飘，重=琥珀多而坠） ---- */
+  const burstStardust = useCallback((weight: number) => {
     const el = inputRef.current;
     const rect = el?.getBoundingClientRect();
     const origin = rect
@@ -366,50 +368,48 @@ export function useFxLayer(
         }
       : { x: 0.5, y: 0.75 };
 
+    const p = emotionStardust(weight);
     const base: confetti.Options = {
-      colors: heavy ? CONFETTI_HEAVY : CONFETTI_LIGHT,
+      colors: p.colors,
       shapes: ["circle"],
-      scalar: heavy ? 1.05 : 0.8,
+      scalar: p.scalar,
       // 沉重：重力明显下坠；轻度：近乎失重地漂浮
-      gravity: heavy ? 0.95 : 0.32,
-      decay: heavy ? 0.95 : 0.93,
-      ticks: heavy ? 300 : 200,
+      gravity: p.gravity,
+      decay: p.decay,
+      ticks: p.ticks,
       disableForReducedMotion: true,
       zIndex: 60,
     };
 
     confetti({
       ...base,
-      particleCount: heavy ? 110 : 46,
-      spread: heavy ? 92 : 70,
-      startVelocity: heavy ? 40 : 28,
+      particleCount: p.count,
+      spread: p.spread,
+      startVelocity: p.velocity,
       origin,
     });
-    // 向上的"逃逸星尘"：沉重情绪只有少量余烬向上
+    // 向上的"逃逸星尘"：越沉重，向上的余烬比例越小
     confetti({
       ...base,
-      particleCount: heavy ? 30 : 16,
-      spread: 42,
-      startVelocity: heavy ? 42 : 44,
+      particleCount: p.upCount,
+      spread: p.upSpread,
+      startVelocity: p.upVelocity,
       angle: 270,
-      scalar: heavy ? 0.85 : 0.65,
+      scalar: p.upScalar,
       origin,
     });
   }, [inputRef]);
 
-  /* ---- 星云加热：回车瞬间把文字粉碎的能量传递给背景星云 ---- */
-  const heatNebula = useCallback((heavy: boolean) => {
-    nebulaTempRef.current = Math.min(
-      1,
-      nebulaTempRef.current + (heavy ? 0.55 : 0.26)
-    );
+  /* ---- 星云加热：回车瞬间把文字粉碎的能量传递给背景星云（按重量插值 0.26~0.55） ---- */
+  const heatNebula = useCallback((weight: number) => {
+    nebulaTempRef.current = Math.min(1, nebulaTempRef.current + emotionHeat(weight));
   }, []);
 
   /* ---- 文字溶解状态（渲染在页面；动画完成回调交还页面释放情绪） ---- */
   const startDissolve = useCallback(
-    (text: string, x: number, y: number, heavy: boolean) => {
+    (text: string, x: number, y: number, weight: number) => {
       dissolveSeq.current += 1;
-      setDissolve({ id: dissolveSeq.current, text, x, y, heavy });
+      setDissolve({ id: dissolveSeq.current, text, x, y, weight });
     },
     []
   );
@@ -445,7 +445,7 @@ export function RippleWave({
   pace?: number;
   onDone: () => void;
 }) {
-  const tone = RIPPLE_TONES[ripple.tone];
+  const tone = ripple.colors ?? RIPPLE_TONES[ripple.tone];
   const size = ripple.size ?? (ripple.supernova ? 170 : 130);
   const endScale = ripple.scaleTo ?? (ripple.supernova ? 6 : 4);
   const dur = (ripple.duration ?? (ripple.supernova ? 3.2 : 2.5)) * pace;

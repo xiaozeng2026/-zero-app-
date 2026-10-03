@@ -9,7 +9,8 @@
  *   - src/hooks/useFxLayer      特效层：涟漪/溶解/流星/热力/星尘/两个共鸣调度器
  *
  * 交互闭环：打字水滴声 → 回车 → 文字 blur 溶解 → 自适应星尘+涟漪+恒星+光影字条
- * 自适应：字数 <10 轻=青白粒子+Pluck 拨弦+快涟漪；>=10 重=琥珀粒子+G1 极低频+深紫巨波
+ * 自适应：情绪重量 0~1（本地加权词典+标点/重复信号，见 lib/emotionWeight），
+ *         轻=青白粒子+Pluck 拨弦+快涟漪，重=琥珀粒子+G1 极低频+深紫巨波，中间连续插值
  * IME：组词（拼音未上屏）期间回车不提交、不逐键响水滴，仅整词上屏后响一声
  */
 
@@ -20,16 +21,21 @@ import NebulaWonders from "@/components/NebulaWonders";
 import {
   applyCircadianPhase,
   ensureAudio,
-  playBassG1,
   playBellThrottled,
   playDrop,
-  playPluck,
+  playSubmit,
   primeAudio,
   sleepAudio,
   wakeAudio,
 } from "@/lib/audioEngine";
 import { CIRCADIAN_TOKENS } from "@/lib/circadian";
 import { CRISIS_WHISPER, detectCrisis } from "@/lib/crisis";
+import {
+  emotionDissolve,
+  emotionRipple,
+  HEAVY_WEIGHT,
+  weightEmotion,
+} from "@/lib/emotionWeight";
 import { hapticShatter } from "@/lib/haptics";
 import { useCircadianPhase } from "@/hooks/useCircadianPhase";
 import { useKeyboardInset } from "@/hooks/useVisualViewport";
@@ -48,9 +54,6 @@ const PHRASES = [
   "撑住...",
   "也是一个人...",
 ];
-
-/** 沉重情绪字数阈值 */
-const HEAVY_THRESHOLD = 10;
 
 interface Whisper {
   id: number;
@@ -184,36 +187,23 @@ export default function Home() {
     (d: DissolveText) => {
       clearDissolve();
 
-      if (d.heavy) {
-        // 沉重情绪：极其缓慢、巨大的深紫色能量涟漪（scale→6.5 / 4.4s）
-        addRipple({
-          x: d.x,
-          y: d.y,
-          tone: "violet",
-          supernova: false,
-          dim: false,
-          size: 200,
-          scaleTo: 6.5,
-          duration: 4.4,
-          peak: 0.72,
-        });
-      } else {
-        // 轻度情绪：青蓝快速小涟漪，像一声清脆的叹息
-        addRipple({
-          x: d.x,
-          y: d.y,
-          tone: "cyan",
-          supernova: false,
-          dim: false,
-          size: 120,
-          scaleTo: 3.4,
-          duration: 1.7,
-          peak: 0.55,
-        });
-      }
+      // 涟漪几何与配色全部按连续重量插值（0=青蓝快波，1=深紫巨波）
+      const r = emotionRipple(d.weight);
+      addRipple({
+        x: d.x,
+        y: d.y,
+        tone: "violet",
+        supernova: false,
+        dim: false,
+        size: r.size,
+        scaleTo: r.scaleTo,
+        duration: r.duration,
+        peak: r.peak,
+        colors: r.colors,
+      });
 
       // 按重量自适应的星尘（青白漂浮 / 琥珀下坠）
-      burstStardust(d.heavy);
+      burstStardust(d.weight);
 
       // 一颗明亮恒星落入上半屏星穹（随机生成 + 持久化，全部本地完成）
       addStar();
@@ -221,7 +211,7 @@ export default function Home() {
     [addRipple, burstStardust, clearDissolve, addStar]
   );
 
-  /* ---- 提交情绪：文字 blur 溶解；声学与物理按字数自适应 ---- */
+  /* ---- 提交情绪：文字 blur 溶解；声学与物理按情绪重量连续自适应 ---- */
   const submitEmotion = useCallback(() => {
     const text = value.trim();
     if (!text) return;
@@ -230,28 +220,24 @@ export default function Home() {
     const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
     const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.87;
 
-    // 情绪重量：字数 >=10 为沉重
-    const heavy = text.length >= HEAVY_THRESHOLD;
-    // 危机文本（自伤/轻生意图）：流程不变，仅替换稍后字条的文案与停留时长
+    // 危机文本（自伤/轻生意图）：重量判满，且稍后字条换成笃定长留的兜底文案
     const crisis = detectCrisis(text);
+    // 情绪重量 0~1：本地加权词典 + 标点密度 + 连续重复字符 + 长度基线
+    const weight = weightEmotion(text, crisis);
+    const heavy = weight >= HEAVY_WEIGHT;
 
     setValue("");
 
     // 触觉：轻情绪一短震，重情绪「震-停-震」模拟重物落地回弹
     hapticShatter(heavy);
-    // 能量传递给星云：沉重更烫
-    heatNebula(heavy);
+    // 能量传递给星云：越沉重越烫
+    heatNebula(weight);
 
-    if (heavy) {
-      // G1（49Hz）极低频叹息，经 22s 海量混响沉入深空
-      playBassG1();
-    } else {
-      // 空灵拨弦：高把位五声音阶
-      playPluck();
-    }
+    // 提交音：Pluck ↔ G1 极低频叹息按重量交叉淡化（经 22s 海量混响沉入深空）
+    playSubmit(weight);
 
-    // 文字本体留在原位，模糊上浮地溶解（沉重时溶解更慢）
-    startDissolve(text, x, y, heavy);
+    // 文字本体留在原位，模糊上浮地溶解（越沉重溶解越慢，1~1.5s）
+    startDissolve(text, x, y, weight);
 
     // 释放的同时，深空飘来一句光影字条（不连续重复）；
     // 危机文本则换成笃定、长留（18s）的陪伴字条，附全国援助渠道
@@ -376,7 +362,7 @@ export default function Home() {
               y: "-68%",
             }}
             transition={{
-              duration: dissolve.heavy ? 1.5 : 1,
+              duration: emotionDissolve(dissolve.weight),
               ease: "easeInOut",
             }}
             onAnimationComplete={() => releaseEmotion(dissolve)}

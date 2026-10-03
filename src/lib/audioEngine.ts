@@ -290,6 +290,26 @@ export function playBassG1(): void {
   whenReady((e) => e.bass.triggerAttackRelease("G1", "1n", claimTime()));
 }
 
+/**
+ * 提交情绪的统一入口：按 0~1 连续重量在 Pluck 与 G1 之间交叉淡化
+ * - w<=0.4 只有高把位拨弦（等价旧 playPluck）；
+ * - w>=0.6 只有 G1 低频叹息（等价旧 playBassG1）；
+ * - 中间带两件乐器同时响，力度反向渐变，从轻灵自然沉到厚重。
+ */
+export function playSubmit(weight: number): void {
+  const w = weight < 0 ? 0 : weight > 1 ? 1 : weight;
+  whenReady((e) => {
+    if (w < 0.6) {
+      const pluckVel = w <= 0.4 ? 1 : 1 - (w - 0.4) / 0.2;
+      e.pluck.triggerAttackRelease(pick(PENTA_HIGH), "8n", claimTime(), pluckVel);
+    }
+    if (w > 0.4) {
+      const bassVel = w >= 0.6 ? 1 : (w - 0.4) / 0.2;
+      e.bass.triggerAttackRelease("G1", "1n", claimTime(), bassVel);
+    }
+  });
+}
+
 /** 涟漪伴随 / 近场共鸣颂钵 */
 export function playBell(): void {
   whenReady((e) => e.bell.triggerAttackRelease(pick(PENTA_MID), "2n", claimTime()));
