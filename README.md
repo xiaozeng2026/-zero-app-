@@ -4,7 +4,7 @@
 > 线上地址：<https://xiaozeng2026.github.io/-zero-app-/>
 >
 > 当前版本：终极形态「宇宙深海 × 情绪自适应 × 星云热力学 × 同辈之网 × 星云奇观 × PWA × 生物钟 × 触觉 × 环保休眠 × 星穹导出」
-> 文档更新日期：2026-10-03（基于 commit 5ac507f）
+> 文档更新日期：2026-10-03（基于 commit 69ce97e）
 
 ---
 
@@ -481,7 +481,7 @@ npm run lint       # ESLint
 npm test           # Vitest 单测（jsdom，src/**/*.test.{ts,tsx}）
 ```
 
-单测覆盖生物钟纯逻辑（`src/lib/circadian.test.ts`：时段边界、下一边界毫秒数、token 表单调性）与水合不变量（`src/hooks/useCircadianPhase.test.tsx`：首帧恒为 evening、挂载后同步真实时段、定时器跨边界换天、卸载清理）——后者是 e746577 SSG 相位漂移的回归守卫。
+单测共 11 个文件 122 例（jsdom，glob `src/**/*.test.{ts,tsx}`）：生物钟纯逻辑与水合不变量（`circadian.test.ts` / `useCircadianPhase.test.tsx`：时段边界、下一边界毫秒数、token 表单调性、首帧恒 evening，是 e746577 SSG 相位漂移的回归守卫）；危机兜底（`crisis.test.ts`：40 词召回、标点空格容错、「笑死/卡死了/撑不下去」假阳性防护、字条无问号含两热线）；情绪重量（`emotionWeight.test.ts`：0 / 0.81 / 0.375 / 危机判满锚点、0~1 钳制、涟漪星尘音效插值端点对齐旧二态）；IME（`ime.test.ts`：组词静默、尾随窗、Esc 取消、净增判定）；星穹存档（`starCodec.test.ts`：坏元素逐字段剔除、120 截断保尾）；星云冷却（`nebula.test.ts`：28s 半衰期、epsilon 归零、零/负 dt 边界）；恒星帧布局（`starRender.test.ts`：悬停 2x / 触摸 1.7x、入场 easeOutBack 超调与落定）。待抽规则：任何新的判定逻辑先落 `src/lib/` 纯函数，page.tsx / hooks 只做调用。
 
 无环境变量、无后端服务、无数据库。`BASE_PATH` 仅在构建期使用（见下节），本地开发不需要设置。
 
@@ -566,6 +566,7 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 
 | 日期 | Commit | 内容 |
 |---|---|---|
+| 2026-10-03 | `69ce97e` | 测试：coolNebula/parseStars 抽 src/lib 纯函数，新增危机/情绪重量/IME/存档/冷却/恒星帧 6 个测试文件（42→122 例），page.tsx 与 hooks 只做调用 |
 | 2026-10-03 | `5ac507f` | 星穹导出：长按空输入框 700ms 静默导出 1080×1920 PNG 海报 + zero-starscape/1 JSON（空框才布防，有文字保留系统长按）；恒星渲染原语抽 src/lib/starRender.ts 屏幕/海报共用 |
 | 2026-10-03 | `94b1f7d` | 重构：120 颗恒星从 240 个常驻 motion 动画迁到单 canvas（位图缓存+全局时间闪烁+easeOutBack 入场），DOM 仅留透明命中按钮，悬停音符音频链路零改动 |
 | 2026-10-03 | `8e0cad7` | 修复：中文 IME 打字水滴误判（composition/inputType 双守卫，组词静默、整词上屏仅一声） |
@@ -589,4 +590,4 @@ git -c http.proxy=http://127.0.0.1:17890 -c https.proxy=http://127.0.0.1:17890 p
 | 2026-10-01 | `8c114cf` | 宇宙深海：Framer Motion DOM 能量涟漪 / 文字 blur 溶解 / 暖金超新星 / 150 星 |
 | 更早 | `6b731af` 等 | 温暖版单页首页、tsparticles v4、confetti、星穹日记、Tone.js 音频 |
 
-*文档版本 v1.8 · 更新于 2026-10-03，基于 commit 5ac507f 的代码现状（危机兜底 / 情绪重量连续值 / IME 加固 / 恒星 canvas 化 / 星穹导出，单测 42 例）。*
+*文档版本 v1.9 · 更新于 2026-10-03，基于 commit 69ce97e 的代码现状（危机兜底 / 情绪重量连续值 / IME 加固 / 恒星 canvas 化 / 星穹导出 / 单测 122 例）。*
