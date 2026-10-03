@@ -37,6 +37,7 @@ import {
   weightEmotion,
 } from "@/lib/emotionWeight";
 import { hapticShatter } from "@/lib/haptics";
+import { shouldPlayCompositionDrop, shouldPlayTypingDrop } from "@/lib/ime";
 import { useCircadianPhase } from "@/hooks/useCircadianPhase";
 import { useKeyboardInset } from "@/hooks/useVisualViewport";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
@@ -75,8 +76,11 @@ export default function Home() {
   const lastPhrase = useRef<string>("");
   /** IME 组词中（拼音未上屏）：期间回车不提交、不逐键响水滴 */
   const composingRef = useRef(false);
-  /** 部分安卓 IME 在 compositionend 之后才发提交回车的 keydown，靠时间窗拦截 */
+  /** 部分安卓 IME 在 compositionend 之后才发提交回车的 keydown，靠时间窗拦截；
+      同时也用于抑制 compositionend 后各浏览器尾随 input 造成的双响 */
   const compositionEndedAt = useRef(0);
+  /** 组词开始时的文本长度：Esc 取消组词或没有净增字时不响水滴 */
+  const compositionStartLen = useRef(0);
 
   /* ---- 生物钟时段（深夜/白天/傍晚，到边界自动切换） ---- */
   const phase = useCircadianPhase();
@@ -258,11 +262,21 @@ export default function Home() {
     }, 1050);
   }, [value, heatNebula, startDissolve]);
 
-  /* ---- 打字反馈：仅"新增字符"且不在 IME 组词中时响水滴 ----
+  /* ---- 打字反馈：水滴判定全部走 lib/ime 纯函数（组词中 / 尾随窗 / 删除 /
+     取消组词一律静默），仅真实净增字时响一声 ----
      playDrop 内部自带「未解锁则初始化后补奏」兜底，无需手动 ensure */
-  const handleChange = (next: string) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.value;
     setValue(next);
-    if (!composingRef.current && next.length > value.length) {
+    if (
+      shouldPlayTypingDrop({
+        composing: composingRef.current,
+        msSinceCompositionEnd: performance.now() - compositionEndedAt.current,
+        inputType: (e.nativeEvent as InputEvent).inputType,
+        prevLen: value.length,
+        nextLen: next.length,
+      })
+    ) {
       playDrop();
     }
   };
@@ -428,15 +442,24 @@ export default function Home() {
             maxLength={80}
             autoComplete="off"
             spellCheck={false}
-            onChange={(e) => handleChange(e.target.value)}
-            onCompositionStart={() => {
+            onChange={handleChange}
+            onCompositionStart={(e) => {
               composingRef.current = true;
+              compositionStartLen.current = e.currentTarget.value.length;
             }}
             onCompositionEnd={(e) => {
               composingRef.current = false;
               compositionEndedAt.current = performance.now();
-              // 整词上屏：只响一声水滴（拼音期间的字符不逐键发声）
-              if (e.currentTarget.value.length > 0) playDrop();
+              // 整词净上屏才响唯一一声水滴（Esc 取消 / 无净增字不响）
+              if (
+                shouldPlayCompositionDrop(
+                  e.data,
+                  compositionStartLen.current,
+                  e.currentTarget.value.length
+                )
+              ) {
+                playDrop();
+              }
             }}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
