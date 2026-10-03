@@ -36,8 +36,9 @@ import {
   HEAVY_WEIGHT,
   weightEmotion,
 } from "@/lib/emotionWeight";
-import { hapticShatter } from "@/lib/haptics";
+import { hapticShatter, hapticTick } from "@/lib/haptics";
 import { shouldPlayCompositionDrop, shouldPlayTypingDrop } from "@/lib/ime";
+import { exportStarscape } from "@/lib/starExport";
 import { useCircadianPhase } from "@/hooks/useCircadianPhase";
 import { useKeyboardInset } from "@/hooks/useVisualViewport";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
@@ -81,6 +82,20 @@ export default function Home() {
   const compositionEndedAt = useRef(0);
   /** 组词开始时的文本长度：Esc 取消组词或没有净增字时不响水滴 */
   const compositionStartLen = useRef(0);
+
+  /* ---- 星穹导出的唯一隐藏入口：长按【空】输入框 700ms（PNG 海报 + JSON） ----
+     只在输入框为空时布防：空框没有选词/光标定位需求，静默手势可被借用；
+     一旦有文字，长按仍完全是系统原生行为，绝不劫持编辑。
+     手指移动超过 12px 或提前松手即取消；全程无控件、无弹窗、无声响。 */
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFrom = useRef<{ x: number; y: number } | null>(null);
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressFrom.current = null;
+  }, []);
 
   /* ---- 生物钟时段（深夜/白天/傍晚，到边界自动切换） ---- */
   const phase = useCircadianPhase();
@@ -179,6 +194,7 @@ export default function Home() {
   useEffect(
     () => () => {
       if (whisperTimer.current) clearTimeout(whisperTimer.current);
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
     },
     []
   );
@@ -276,6 +292,27 @@ export default function Home() {
     ) {
       playDrop();
     }
+  };
+
+  /* ---- 长按手势（空框才布防，见 longPressTimer 注释） ---- */
+  const onInputPointerDown = (e: React.PointerEvent<HTMLInputElement>) => {
+    if (e.button !== 0 || value.length > 0) return;
+    longPressFrom.current = { x: e.clientX, y: e.clientY };
+    longPressTimer.current = setTimeout(() => {
+      longPressTimer.current = null;
+      longPressFrom.current = null;
+      // 极轻一啄确认「收到」；空星穹静默忽略
+      if (exportStarscape(stars).ok) hapticTick();
+    }, 700);
+  };
+  const onInputPointerMove = (e: React.PointerEvent<HTMLInputElement>) => {
+    const p = longPressFrom.current;
+    if (!p) return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 12) cancelLongPress();
+  };
+  // 空框长按期间压制系统菜单（有文字时放行，保留粘贴/选词）
+  const onInputContextMenu = (e: React.MouseEvent<HTMLInputElement>) => {
+    if (value.length === 0) e.preventDefault();
   };
 
   /* ---------------------------------------------------------------- */
@@ -394,6 +431,12 @@ export default function Home() {
             autoComplete="off"
             spellCheck={false}
             onChange={handleChange}
+            onPointerDown={onInputPointerDown}
+            onPointerMove={onInputPointerMove}
+            onPointerUp={cancelLongPress}
+            onPointerCancel={cancelLongPress}
+            onPointerLeave={cancelLongPress}
+            onContextMenu={onInputContextMenu}
             onCompositionStart={(e) => {
               composingRef.current = true;
               compositionStartLen.current = e.currentTarget.value.length;
@@ -429,6 +472,7 @@ export default function Home() {
               submitEmotion();
             }}
             placeholder="把情绪留在这里..."
+            style={{ WebkitTouchCallout: value ? "default" : "none" }}
             className="pointer-events-auto relative z-10 w-full select-text border-none bg-transparent text-center text-[17px] font-light tracking-[0.2em] text-amber-50/55 caret-amber-300/80 outline-none transition-[color,text-shadow] duration-700 placeholder:tracking-[0.32em] placeholder:text-neutral-400/40 placeholder:transition-opacity duration-700 focus:text-amber-50/90 [text-shadow:0_0_14px_rgba(251,191,36,0.12)] focus:[text-shadow:0_0_26px_rgba(251,191,36,0.45)] focus:placeholder:opacity-30"
           />
 
